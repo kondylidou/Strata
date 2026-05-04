@@ -1,30 +1,32 @@
 # Boole Benchmark Targets
 
-Source: [dalek-lite](https://github.com/Beneficial-AI-Foundation/dalek-lite) — a Verus-verified Rust implementation of Curve25519/Ed25519.
-Each benchmark is a real exec function with `requires`/`ensures`. The goal: run through the Verus → Boole pipeline and discharge postconditions with cvc5.
+Benchmarks B1–B5 come from [dalek-lite](https://github.com/Beneficial-AI-Foundation/dalek-lite) — a Verus-verified Rust implementation of Curve25519/Ed25519. Each is a real exec function with `requires`/`ensures`; the goal is to run through the Verus → Boole pipeline and discharge postconditions with cvc5.
+
+B6 comes from [RustCrypto/hashes](https://github.com/RustCrypto/hashes) — plain (non-Verus) Rust. The spec is written by us in Boole directly, exercising the pipeline on a widely deployed symmetric primitive.
 
 ---
 
 ## Why these benchmarks
 
-The five benchmarks are the core operations of three widely deployed cryptographic systems: X25519 key exchange, Ed25519 signatures, and Ristretto255 (the prime-order group used in zero-knowledge proof frameworks).
+B1–B5 are the core operations of three widely deployed cryptographic systems: X25519 key exchange, Ed25519 signatures, and Ristretto255 (the prime-order group used in zero-knowledge proof frameworks).
 
 - Field multiplication (`FieldElement51::mul`) is the arithmetic foundation of Curve25519 — every higher-level operation, from key exchange to signature verification, ultimately reduces to repeated calls to it.
 - Scalar reduction (`from_bytes_mod_order_wide`) reduces a 64-byte hash output to a canonical scalar, enforcing the security property whose absence caused signature malleability vulnerabilities in several widely-used libraries including OpenSSL and tinyssh (RFC 8032 §5.1.7); it additionally guarantees that a uniformly random input produces a uniformly random scalar — the property required for secure nonce generation in EdDSA.
-- Point decompression (`CompressedEdwardsY::decompress`) and Ristretto compression (`RistrettoPoint::compress`) are the serialization steps that happen at every signature verification and every zero-knowledge proof respectively.
+- Point decompression (`CompressedEdwardsY::decompress`) and Ristretto compression (`RistrettoPoint::compress`) are the serialization steps that happen at every Ed25519 signature verification and every Ristretto255-based proof respectively.
 - `MontgomeryPoint::mul_clamped` is the core scalar multiplication step of X25519 — the key exchange used in TLS 1.3, Signal, WireGuard, and SSH.
+
+B6 (`compress_u32`) adds a symmetric-primitive target: SHA-256 underpins HMAC-SHA-256, TLS 1.3 key derivation, and Bitcoin's double-SHA-256 proof-of-work, making it one of the most widely deployed hash primitives in existence.
 
 ## Overview
 
-The five benchmarks cover the main source modules of the repo:
-
-| # | Function | Protocol / Layer | Module | Total lines | Exec lines |
+| # | Function | Protocol / Layer | Source | Total lines | Exec lines |
 |---|----------|-----------------|--------|:-----------:|:----------:|
 | 1 | `FieldElement51::mul` | Field arithmetic — GF(2²⁵⁵ − 19) | `field.rs` | 149 | ~50 |
 | 2 | `Scalar::from_bytes_mod_order_wide` | Scalar arithmetic — ℤ/ℓℤ | `scalar.rs` | 49 | 13 |
 | 3 | `CompressedEdwardsY::decompress` | Ed25519 — point decompression | `edwards.rs` | 76 | ~36 |
 | 4 | `RistrettoPoint::compress` | Ristretto / ZK — group encoding | `ristretto.rs` | 309 | ~35 |
 | 5 | `MontgomeryPoint::mul_clamped` | X25519 — key exchange | `montgomery.rs` | 45 (+400†) | 3 (+400†) |
+| 6 | `compress_u32` | SHA-256 block compression | `sha256/soft/compact.rs` | ~55 | ~45 |
 
 † `mul_clamped` delegates to `mul_bits_be` (the Montgomery ladder), which is ~400 lines with a loop invariant.
 
@@ -109,8 +111,8 @@ u1 = (Z+Y)(Z−Y),  u2 = X·Y,  invsqrt = 1/√(u1·u2²)
 → serialize to 32 bytes
 ```
 
-- Ristretto255 is the prime-order group used in **Bulletproofs**, **Pedersen commitments**, and **range proof systems**. It eliminates the cofactor-8 problem of raw Curve25519, which would otherwise allow forged ZK proofs. `compress` is called every time a group element is serialised — i.e., in every proof.
-- The postcondition is a functional-correctness theorem linking imperative Rust to the [RISTRETTO RFC (RFC 9496)](https://datatracker.ietf.org/doc/html/rfc9496) mathematical spec.
+- Ristretto255 is the prime-order group abstraction over Curve25519 (cofactor 8); it eliminates the cofactor problem that would otherwise allow forged proofs. The `dalek-cryptography/bulletproofs` crate builds Bulletproofs and Pedersen commitments over it. `compress` is called every time a group element is serialised.
+- The postcondition is a functional-correctness theorem linking imperative Rust to the [Ristretto RFC (RFC 9496)](https://datatracker.ietf.org/doc/html/rfc9496) mathematical spec.
 - Builds directly on Benchmark 1: once `mul` is axiomatized, all remaining field ops follow the same pattern.
 
 ---
@@ -137,6 +139,28 @@ pub fn mul_clamped(self, bytes: [u8; 32]) -> (result: Self)
 
 ---
 
+## Benchmark 6 — `compress_u32`
+
+**~55 lines** (sha256/soft/compact.rs) · ~45 exec statements · source: [RustCrypto/hashes](https://github.com/RustCrypto/hashes/blob/master/sha2/src/sha256/soft/compact.rs)
+
+```rust
+fn compress_u32(state: &mut [u32; 8], mut block: [u32; 16]) { ... }
+```
+
+The spec we write in Boole:
+
+```
+ensures *state == sha256_compress_spec(initial_state, block)
+```
+
+where `sha256_compress_spec` is the FIPS 180-4 round function unrolled over 64 iterations, using the SHA-256 constants `K32`.
+
+- SHA-256 underpins HMAC-SHA-256, TLS 1.3 key derivation, and Bitcoin's double-SHA-256 proof-of-work; `compress_u32` is among the most widely deployed hash primitives in existence.
+- Unlike B1–B5 (Verus-annotated), the spec is written by us in Boole directly. The 64-round loop with in-place message schedule and eight chained `u32` state variables exercises `bv32` arithmetic, `rotate_right`, array indexing, loop invariants, and wrapping addition.
+- New language feature required: `rotate_right` (`bvrotr` in SMT-LIB).
+
+---
+
 ## Gap status
 
 Legend: ○ open · ✓ done
@@ -149,7 +173,7 @@ only once all gaps for that benchmark are closed. Until then, gap-specific small
 seeds live in
 [`StrataTest/Languages/Boole/FeatureRequests/`](../StrataTest/Languages/Boole/FeatureRequests/).
 
-**Shared by all five benchmarks:**
+**Shared by all six benchmarks:**
 
 | Gap | FR# | Status | Gap seed |
 |-----|-----|--------|----------|
@@ -171,4 +195,8 @@ seeds live in
 | 4 | Field op axioms | — | ○ open | `add`, `sub`, `square`, `invsqrt`, `conditional_negate`, `as_bytes` — each needs a Boole axiom |
 | 5 | Inline `let`-block postcondition | — | ✓ done | Implemented; see [`embedded_postcondition.lean`](../StrataTest/Languages/Boole/embedded_postcondition.lean) and BooleFeatureRequests.md |
 | 5 | Montgomery ladder invariant | — | ○ open | Requires group-law axioms (Costello-Smith 2017, eq. 4); [`montgomery_loop_invariant.lean`](../StrataTest/Languages/Boole/FeatureRequests/montgomery_loop_invariant.lean) covers the relational loop pattern |
+| 6 | `rotate_right` / `bvrotr` | — | ○ open | `u32::rotate_right(n)` used 6× in the round function; needs `Bv{N}.RotR` Core op and Boole syntax |
+| 6 | `[u32; N]` arrays as `Map int bv32` | — | ○ open | Same pattern as `[u8; 64]` in B2; modular index arithmetic `i % 16` also needed |
+| 6 | 64-round loop invariant | — | ○ open | State and message-schedule invariant across all 64 rounds; blocked on loop invariant support |
+| 6 | SHA-256 round spec axiom | — | ○ open | `sha256_compress_spec` needs to be declared as a Boole axiom linking the imperative loop to the FIPS 180-4 spec |
 

@@ -15,17 +15,13 @@ This document tracks the selected Boole feature-request seeds kept under
 ## Implemented feature requests
 
 - **Extensional equality** (#684, #795)
-  - Syntax: `a =~= b`; lowers via `toCoreExtensionalEq` to `∀ i : k . a[i] == b[i]`.
-  - `axiomatizeArrays` (PR #795) moves array-theory encoding to a post-encoding SMT-IR pass.
-  - Regression test covers de Bruijn capture under outer quantifiers.
+  - `a =~= b` lowers to `∀ i : k . a[i] == b[i]`; array-theory encoding moved to a post-encoding SMT-IR pass.
   - Remaining gaps: named map synonyms, sequences, higher-order extensionality.
 - **Nested `for`-loop lowering**
-  - Fresh Core block labels prevent inner loops from shadowing the enclosing `"for"` label.
-  - Loop elimination havocs only loop-carried variables, not block-local indices.
+  - Fresh Core block labels prevent inner loops from shadowing the enclosing `"for"` label; loop elimination havocs only loop-carried variables.
   - Benchmark: [`square_matrix_multiply.lean`](../StrataTest/Languages/Boole/square_matrix_multiply.lean).
 - **Early return** (#871)
-  - Every procedure body is wrapped in a Core labeled block named after the procedure.
-  - `exit functionName;` exits that block, acting as an early return; no grammar changes needed.
+  - `exit functionName;` exits the labeled Core block wrapping the procedure body, acting as an early return.
 - **Bitwise operators on `bvN` types** (#970)
   - `&`, `|`, `^`, `>>` (UShr), `>>s` (SShr), `<<`, `~` lower to `Bv{N}.And/Or/Xor/UShr/SShr/Shl/Not` Core ops.
   - `bvWidth` helper extracts the bit-width from the Boole type and dispatches to the right-sized op.
@@ -34,34 +30,26 @@ This document tracks the selected Boole feature-request seeds kept under
   - `a <s b` etc. lower via `toCoreBvBin` to `Bv{N}.SLt/SLe/SGt/SGe`; four `toCoreExpr` cases added to `Verify.lean`.
   - Benchmark: [`bitvector_ops.lean`](../StrataTest/Languages/Boole/bitvector_ops.lean) (`bv_signed_cmp`, 7 postconditions).
 - **Mutual recursion over datatypes** (#599)
-  - `rec function ... ;` blocks work end-to-end; two `Verify.lean` fixes: `lowerPureFuncDef` propagates `@[cases]` to `FuncAttr.inlineIfConstr`, and `toCoreDecls` injects preceding sibling op-exprs as De Bruijn bvars so cross-sibling calls resolve.
-  - Remaining gap: mutual recursion over `int` still needs function-level `decreases` (not yet implemented).
+  - `rec function ... ;` blocks work end-to-end for structural recursion over datatypes.
+  - Remaining gap: mutual recursion over `int` still requires function-level `decreases` and int-based termination.
   - Benchmark: [`mutual_recursion.lean`](../StrataTest/Languages/Boole/FeatureRequests/mutual_recursion.lean) (`even`/`odd` over `MyNat`).
 - **`choose` syntax**
-  - `w := choose z : T :: pred(z)` desugars to `havoc w; assume pred[z/w]` in `toCoreStmt`.
-  - Grammar op `choose_assign` added to `Boole/Grammar.lean`; `" :: "` separator avoids dot-access ambiguity.
+  - `w := choose z : T :: pred(z)` desugars to `havoc w; assume pred[z/w]`.
   - Benchmark: [`choose_operator.lean`](../StrataTest/Languages/Boole/choose_operator.lean).
 - **`decreases` annotation on functions and procedures**
-  - `decreases e;` is now a `SpecElt` in Core grammar; parses in function `preconds` and `spec {}` blocks. Silently dropped by `toCoreSpecElts`.
-  - `boole_procedure` accepts an optional `Measure` (`decreases e`) before the spec block. Dropped by the lowering.
-  - Termination is not separately verified in the SMT path; the annotation is preserved for readability and for future well-foundedness checking.
-  - Remaining gap: recursive functions over `int` still require `@[cases]` in the Core type-checker; int-based termination proofs are not yet supported.
+  - Parsed in function preconds, `spec {}` blocks, and as an optional procedure `Measure`; silently dropped by the lowering. Termination is not separately verified in the SMT path.
+  - Remaining gap: recursive functions over `int` still require `@[cases]`; int-based termination is not yet supported.
   - Benchmark: [`decreases_metadata.lean`](../StrataTest/Languages/Boole/FeatureRequests/decreases_metadata.lean).
 - **`Sequence T` type and slicing ops**
-  - `Sequence T` now translates: `toCoreMonoType` handles `.Sequence _ elem` → `.tcons "Sequence" [elem]`.
-  - All 8 Core inherited ops have `toCoreExpr` cases routing to the corresponding `Core.*Op` constants. They are called in Boole via their canonical qualified-keyword syntax: `Sequence.length(s)`, `Sequence.select(s,i)`, `Sequence.take(s,n)`, `Sequence.drop(s,n)`, `Sequence.append(s1,s2)`, `Sequence.build(s,v)`, `Sequence.update(s,i,v)`, `Sequence.contains(s,v)`.
-  - Three Boole-specific wrappers added to `Grammar.lean`: `Sequence.skip(s,n)` (lowers to `seq_drop`), `Sequence.dropFirst(s)` (lowers to `seq_drop(s,1)`), `Sequence.subrange(s,lo,hi)` (expands to `Sequence.take(Sequence.drop(s,lo), hi-lo)` in the lowering). The `"Sequence.xxx"` single-string-token pattern is used deliberately: it places the dot inside a string literal, preventing the DDM's `qualifiedIdentExplicit` rule from consuming `id.id` as a qualified identifier before Expr-level trailing rules can apply.
+  - All 8 Core inherited ops wired up; three Boole-specific wrappers added: `Sequence.skip`, `Sequence.dropFirst`, `Sequence.subrange`.
   - Remaining gap: recursive spec functions over sequences need int-based termination proofs (blocked on `@[cases]`-free recursion over `int`).
   - Benchmark: [`seq_slicing.lean`](../StrataTest/Languages/Boole/FeatureRequests/seq_slicing.lean).
 - **Inline `let`-block postconditions**
-  - `ensures ({ let x = e; ... })` — postconditions whose body is a `let`-binding block — now lower correctly. Each `let` binding is translated to a Core local definition before the postcondition expression is evaluated.
-  - Enables encoding of dalek-lite's `mul_clamped` postcondition style directly.
+  - `ensures ({ let x = e; ... })` now lowers correctly; enables dalek-lite's `mul_clamped` postcondition style.
   - Benchmark: [`embedded_postcondition.lean`](../StrataTest/Languages/Boole/embedded_postcondition.lean).
 - **Lambda abstraction and application**
-  - `fun x : T => body` (Core's `lambda` op) now lowers to a Core `.abs` node: `toCoreExpr` handles `.lambda _ _ decls body` by building nested `.abs` nodes via the same `declListToList` / `withBVarExprs` / `foldr` pattern used for quantifiers.
-  - `(f)(x)` (Core's `apply_expr` op) lowers to `.app () f x`.
-  - Arrow types `T -> U` were already handled by `toCoreMonoType`.
-  - Remaining gap: first-class function values as procedure parameters / local variables still need abstract-type encoding for the SMT path; lambda works in spec expression positions.
+  - `fun x : T => body` lowers to nested Core `.abs` nodes; `(f)(x)` lowers to `.app () f x`.
+  - Remaining gap: first-class function values as procedure parameters / local variables still need abstract-type encoding for the SMT path.
   - Benchmark: [`lambda_closure.lean`](../StrataTest/Languages/Boole/FeatureRequests/lambda_closure.lean).
 
 ## Semantic preservation requests
@@ -72,7 +60,6 @@ This document tracks the selected Boole feature-request seeds kept under
 4. **`closed` visibility**: Lower priority. Keep closed spec-function bodies hidden across module boundaries.
 5. **Overflow guards**: Lower priority. Preserve `HasType`-style arithmetic overflow checks if Verus-specific guards are worth modeling directly.
 6. **Widening casts outside call sites**: Insert or preserve cast/coercion structure in comparisons, quantifiers, and other expressions with a centralized type-directed coercion pass.
-7. **`decreases` metadata**: Implemented for parsing — loop-level, function-level (as `SpecElt`), and procedure-level (as optional `Measure`) `decreases` all parse and are silently dropped by the lowering. Loop measures are used for VC generation; function/procedure measures are not separately verified. Remaining gap: recursive functions over `int` still require `@[cases]`-based structural recursion; int-based termination checking is not yet supported.
 
 ## Type/model requests
 
