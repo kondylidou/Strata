@@ -11,33 +11,21 @@ open Strata
 /-
 Near-upstream anchor:
 - Source: dalek-lite `curve25519-dalek/src/scalar.rs`
-  `Scalar::from_bytes_mod_order_wide` (line 300–348) — reduces a 64-byte input
-  (size of a SHA-512 hash output) modulo the group order ℓ and returns a
-  canonical scalar. This is Benchmark 2; the axiom pattern also covers the
-  32-byte variant `from_bytes_mod_order` (line 273–291):
-    pub fn from_bytes_mod_order_wide(input: &[u8; 64]) -> (result: Scalar)
-        ensures
-            scalar_as_canonical(&result) == group_canonical(bytes_seq_as_nat(input@)),
-            is_canonical_scalar(&result),
-    {
-        // ... Barrett reduction over 9 limbs
-    }
+  `Scalar::from_bytes_mod_order_wide` (line 300–348) — reduces a 64-byte
+  SHA-512 hash output modulo the group order ℓ to a canonical scalar (B2).
+  The axiom pattern also covers `from_bytes_mod_order` (line 273–291, 32-byte).
 
 Implemented:
-- `ByteArray32` and `Scalar` are kept abstract — no byte-array indexing or
-  struct-field access is needed for this seed.
-- `u8_32_as_group_canonical` stays abstract (an uninterpreted spec function);
-  its recursive byte-accumulation definition is the remaining open gap for
-  Benchmark 2 (requires int-based termination over sequences).
-- Two axioms capture exactly what `reduce` guarantees:
-    scalar_as_canonical(reduce(b)) == u8_32_as_group_canonical(b)
-    is_canonical_scalar(reduce(b))
-- The 3-statement procedure body verifies by axiom instantiation alone.
+- `ByteArray64` and `Scalar` kept abstract — no byte-array indexing or
+  struct-field access needed for this seed.
+- `u8_64_as_group_canonical` stays abstract; its recursive byte-accumulation
+  definition requires int-based termination over sequences (open Gap #11).
+- Two axioms capture what `reduce` guarantees; the procedure body verifies
+  by axiom instantiation alone.
 
 Remaining gap:
-- `[u8; 32]` byte arrays modeled as `Map int bv8` so `u8_32_as_group_canonical`
-  can be spelled out recursively (sequence slicing + int termination needed).
-- Struct field access (`Scalar { bytes }`) not yet modeled; kept abstract here.
+- Spelling out `u8_64_as_group_canonical` recursively requires Gap #11.
+- `Scalar { bytes }` struct construction requires Gap #13.
 -/
 
 private def scalarReduceSeed : Strata.Program :=
@@ -47,17 +35,17 @@ program Boole;
 type ByteArray64;
 type Scalar;
 
-function reduce(b: ByteArray32) : Scalar;
+function reduce(b: ByteArray64) : Scalar;
 function scalar_as_canonical(s: Scalar) : int;
-function u8_32_as_group_canonical(b: ByteArray32) : int;
+function u8_64_as_group_canonical(b: ByteArray64) : int;
 function is_canonical_scalar(s: Scalar) : bool;
 
-axiom (∀ b: ByteArray32 . scalar_as_canonical(reduce(b)) == u8_32_as_group_canonical(b));
-axiom (∀ b: ByteArray32 . is_canonical_scalar(reduce(b)));
+axiom (∀ b: ByteArray64 . scalar_as_canonical(reduce(b)) == u8_64_as_group_canonical(b));
+axiom (∀ b: ByteArray64 . is_canonical_scalar(reduce(b)));
 
-procedure from_bytes_mod_order(bytes: ByteArray32) returns (result: Scalar)
+procedure from_bytes_mod_order_wide(bytes: ByteArray64) returns (result: Scalar)
 spec {
-  ensures scalar_as_canonical(result) == u8_32_as_group_canonical(bytes);
+  ensures scalar_as_canonical(result) == u8_64_as_group_canonical(bytes);
   ensures is_canonical_scalar(result);
 }
 {
@@ -66,11 +54,11 @@ spec {
 #end
 
 /-- info:
-Obligation: from_bytes_mod_order_ensures_2_2014
+Obligation: from_bytes_mod_order_wide_ensures_2_2014
 Property: assert
 Result: ✅ pass
 
-Obligation: from_bytes_mod_order_ensures_3_2088
+Obligation: from_bytes_mod_order_wide_ensures_3_2088
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in
