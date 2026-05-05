@@ -14,12 +14,16 @@ This document tracks the selected Boole feature-request seeds kept under
 
 ## Implemented feature requests
 
-- **Extensional equality** (#684, #795)
-  - `a =~= b` lowers to `∀ i : k . a[i] == b[i]`; array-theory encoding moved to a post-encoding SMT-IR pass.
+- **Extensional equality** (#684)
+  - `a =~= b` lowers to `∀ i : k . a[i] == b[i]`.
   - Remaining gaps: named map synonyms, sequences, higher-order extensionality.
-- **Nested `for`-loop lowering**
+- **Array axiomatization as standalone SMT-IR pass** (#795)
+  - Post-encoding pass rewrites Array-theory SMT-IR to `Map` sorts with read-over-write axioms (generated only for type pairs used); fixes type-mismatch bug for datatypes with `Map` fields.
+  - Remaining Boole-syntax gaps for `[T; N]`: see Gap #25.
+- **Nested `for`-loop lowering** (range-style: `for i in 0..N`)
   - Fresh Core block labels prevent inner loops from shadowing the enclosing `"for"` label; loop elimination havocs only loop-carried variables.
   - Benchmark: [`square_matrix_multiply.lean`](../StrataTest/Languages/Boole/square_matrix_multiply.lean).
+  - Note: covers `for i in 0..N` range loops only. Iterator-based `for x in iter.iter()` is a separate gap (#27).
 - **Early return** (#871)
   - `exit functionName;` exits the labeled Core block wrapping the procedure body, acting as an early return.
 - **Bitwise operators on `bvN` types** (#970)
@@ -70,6 +74,13 @@ This document tracks the selected Boole feature-request seeds kept under
 12. **Generic/category typing cleanup**: Reduce `nat`/`int`/bitvector width mismatches and generic type-shape mismatches in the type-checker.
 13. **Struct/record types with named field access**: `type T := { f1: A, f2: B }` declarations, `.field` accessor expressions, struct literal construction, and quantification over fixed-size field arrays (e.g. `∀ i < 5 . fe.limbs[i] < 2^51`). Used in every dalek spec function.
 14. **`Option<T>` in spec functions**: Native `Option<T>` return type so fallible spec functions can be represented faithfully; currently encoded as `is_some` flag plus component functions. Every Vest parser returns `Option<(int, T)>`.
+25. **Fixed-size array `[T; N]` syntax** (#795): SMT backend resolved by PR #795. Remaining Boole-syntax gaps:
+    - **Repeat initializer `[expr; N]`**: `[0u32; 16]` — lower to a constant-valued Map.
+    - **Array literal `[x, y, z, ...]`**: `K32: [u32; 64] = [0x428a2f98, ...]` — compact literal syntax.
+    - **Mutable write-back `arr[i] = v`**: `block[i % 16] = new_w` — lower to `Map.put`.
+    - Note: `FieldElement51.limbs: [u64; 5]` handled by Gap #13, not this gap.
+    - Confirmed in sha256: `[u32; 64]`, `[u32; 16]`, `[u8; 64]`, `[0u32; 16]`, `K32: [u32; 64] = [...]`.
+26. **Slice types and slice indexing**: `&[T]` and `&[T; N]` — length, indexing, sub-slicing. Distinct from sequence slicing (#11): slices are runtime-sized Rust borrows. Confirmed in sha256: `blocks: &[[u8; 64]]`, `blocks[k]`, `to_u32s(&blocks[k])`.
 
 ## Expressiveness requests
 
@@ -79,6 +90,7 @@ This document tracks the selected Boole feature-request seeds kept under
 18. **Trait-spec symbol resolution**: Preserve trait-spec symbols across module boundaries.
 19. **Trait / interface with spec and proof methods**: `interface` declarations bundling `spec function` and `lemma` members, with `matches` pattern syntax in `ensures` and `external_body`-style trusted bodies. Confirmed as the backbone of Vest combinators.
 20. **Reusable math spec support**: `pow2`, summation, and modular arithmetic helpers for functional specs; avoids re-axiomatising arithmetic in each seed.
+27. **Rust iterator protocol lowering** (`for x in iter.iter()`): Leaves symbols undefined — `Iter_Traits_Iterator_Iterator_next`, `Pervasive_ghost_decrease/invariant`, `Std_specs_Slice_spec_slice_iter`, `Option_option..isOption_option_Some`; loop locals `VERUS_iter/exec_iter/ghost_iter`. Distinct from `for i in 0..N` (implemented). Confirmed in sha256: `for block in blocks.iter()`.
 
 ## Robustness requests
 
@@ -89,6 +101,7 @@ This document tracks the selected Boole feature-request seeds kept under
 ## Bitvector requests
 
 24. **`by (bit_vector)` proof mode**: Route pure bitvector sub-goals to a bitvector decision procedure automatically. Confirmed in Vest LEB128 (`assert(...) by (bit_vector)`).
+28. **`bv` rotate_left / rotate_right as primitives**: Currently emitted as `(x >> n) | (x << (w - n))` with `requires 1 <= n < w`; SMT-LIB 2 has native ops. Confirmed in sha256: `rotate_right` with n ∈ {2, 6, 7, 11, 13, 17, 18, 19, 22, 25}.
 
 ## Boole seed examples
 
@@ -116,7 +129,8 @@ These are the curated one-gap Boole seeds.
 | [`bitvector_ops.lean`](../StrataTest/Languages/Boole/bitvector_ops.lean) | Bitwise operators on `bvN` types | dalek-lite `scalar_specs.rs` | Implemented (#970) |
 | [`bitvector_proof_mode.lean`](../StrataTest/Languages/Boole/FeatureRequests/bitvector_proof_mode.lean) | `by (bit_vector)` proof mode | VeruSAGE-Bench Vest `leb128` | Active |
 | [`seq_slicing.lean`](../StrataTest/Languages/Boole/FeatureRequests/seq_slicing.lean) | Sequence slicing (`subrange`, `skip`, `take`, `drop_first`) and all 8 Core `Sequence.*` ops | dalek-lite `scalar_specs.rs`, `core_specs.rs`; Vest `leb128`, `repetition` | Implemented (#1075); remaining gap: recursive spec functions over sequences need int-based termination proofs |
-| [`scalar_reduce.lean`](../StrataTest/Languages/Boole/FeatureRequests/scalar_reduce.lean) | `reduce()` spec axiom for B2 (`Scalar::from_bytes_mod_order`) | dalek-lite `scalar.rs` | Implemented (#1075); `u8_32_as_group_canonical` stays abstract pending int-based termination for recursive seq spec functions |
+| [`scalar_reduce.lean`](../StrataTest/Languages/Boole/FeatureRequests/scalar_reduce.lean) | `reduce()` spec axiom for B2 (`Scalar::from_bytes_mod_order_wide`) | dalek-lite `scalar.rs` | Implemented (#1075); `bytes_seq_as_nat` stays abstract pending Gap #11 |
 | [`struct_field_access.lean`](../StrataTest/Languages/Boole/FeatureRequests/struct_field_access.lean) | Struct/record types with named field access | dalek-lite `field_specs.rs`, `edwards_specs.rs` | Active |
 | [`trait_spec_methods.lean`](../StrataTest/Languages/Boole/FeatureRequests/trait_spec_methods.lean) | Trait / interface with spec and proof methods; `matches` in `ensures` | VeruSAGE-Bench Vest `SecureSpecCombinator` | Active |
 | [`option_matches.lean`](../StrataTest/Languages/Boole/FeatureRequests/option_matches.lean) | `Option<T>` in spec functions; `matches` in `ensures`/`exists` | VeruSAGE-Bench Vest `SecureSpecCombinator`, `leb128` | Active |
+| `sha256_compact.rs` *(no Lean seed yet)* | Iterator protocol lowering (#27), array syntax (#25), slice types (#26), `bv` rotate primitives (#28) | RustCrypto SHA-256 compact port | Active |

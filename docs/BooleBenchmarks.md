@@ -2,20 +2,16 @@
 
 Benchmarks B1–B5 come from [dalek-lite](https://github.com/Beneficial-AI-Foundation/dalek-lite) — a Verus-verified Rust implementation of Curve25519/Ed25519. Each is a real exec function with `requires`/`ensures`; the goal is to run through the Verus → Boole pipeline and discharge postconditions with cvc5.
 
-B6 comes from [RustCrypto/hashes](https://github.com/RustCrypto/hashes) — plain (non-Verus) Rust. The spec is written by us in Boole directly, exercising the pipeline on a widely deployed symmetric primitive.
-
 ---
 
 ## Why these benchmarks
 
-B1–B5 are the core operations of three widely deployed cryptographic systems: X25519 key exchange, Ed25519 signatures, and Ristretto255 (the prime-order group used in zero-knowledge proof frameworks).
+B1–B5 cover the full stack of three widely deployed cryptographic systems: X25519 key exchange, Ed25519 signatures, and Ristretto255.
 
-- Field multiplication (`FieldElement51::mul`) is the arithmetic foundation of Curve25519 — every higher-level operation, from key exchange to signature verification, ultimately reduces to repeated calls to it.
-- Scalar reduction (`from_bytes_mod_order_wide`) reduces a 64-byte hash output to a canonical scalar, enforcing the security property whose absence caused signature malleability vulnerabilities in several widely-used libraries including OpenSSL and tinyssh (RFC 8032 §5.1.7); it additionally guarantees that a uniformly random input produces a uniformly random scalar — the property required for secure nonce generation in EdDSA.
-- Point decompression (`CompressedEdwardsY::decompress`) and Ristretto compression (`RistrettoPoint::compress`) are the serialization steps that happen at every Ed25519 signature verification and every Ristretto255-based proof respectively.
-- `MontgomeryPoint::mul_clamped` is the core scalar multiplication step of X25519 — the key exchange used in TLS 1.3, Signal, WireGuard, and SSH.
-
-B6 (`compress_u32`) adds a symmetric-primitive target: SHA-256 underpins HMAC-SHA-256, TLS 1.3 key derivation, and Bitcoin's double-SHA-256 proof-of-work, making it one of the most widely deployed hash primitives in existence.
+- `FieldElement51::mul` — arithmetic foundation; every curve operation reduces to repeated calls to it.
+- `from_bytes_mod_order_wide` — reduces a 64-byte hash to a canonical EdDSA signing scalar; absent canonicality caused malleability vulnerabilities in OpenSSL and tinyssh (RFC 8032 §5.1.7); the uniform-output property prevents key leakage via biased nonces.
+- `CompressedEdwardsY::decompress` / `RistrettoPoint::compress` — serialization at every Ed25519 verification and Ristretto255 proof.
+- `MontgomeryPoint::mul_clamped` — core of X25519, used in TLS 1.3, Signal, WireGuard, and SSH.
 
 ## Overview
 
@@ -26,7 +22,6 @@ B6 (`compress_u32`) adds a symmetric-primitive target: SHA-256 underpins HMAC-SH
 | 3 | `CompressedEdwardsY::decompress` | Ed25519 — point decompression | `edwards.rs` | 76 | ~36 |
 | 4 | `RistrettoPoint::compress` | Ristretto / ZK — group encoding | `ristretto.rs` | 309 | ~35 |
 | 5 | `MontgomeryPoint::mul_clamped` | X25519 — key exchange | `montgomery.rs` | 45 (+400†) | 3 (+400†) |
-| 6 | `compress_u32` | SHA-256 block compression | `sha256/soft/compact.rs` | ~55 | ~45 |
 
 † `mul_clamped` delegates to `mul_bits_be` (the Montgomery ladder), which is ~400 lines with a loop invariant.
 
@@ -45,9 +40,8 @@ fn mul(self, _rhs: &'a FieldElement51) -> (output: FieldElement51)
         fe51_limbs_bounded(&output, 52),
 ```
 
-- Every Curve25519 operation — X25519, Ed25519, Ristretto — reduces to repeated calls to `mul`.
-- Proving `mul` correct verifies the arithmetic foundation every higher-level proof depends on.
-- The postcondition is a bounded-integer arithmetic claim.
+- Foundation of all Curve25519 arithmetic; every higher-level operation reduces to `mul`.
+- Postcondition: bounded-integer claim over 5-limb radix-2⁵¹ representation.
 
 ---
 
@@ -63,9 +57,9 @@ pub fn from_bytes_mod_order_wide(input: &[u8; 64]) -> (result: Scalar)
         is_uniform_bytes(input) ==> is_uniform_scalar(&result),
 ```
 
-- Takes a 64-byte input — the size of a SHA-512 hash output — and reduces it mod ℓ to a canonical scalar. This is the function used in EdDSA nonce generation: `H(k || M)` (a 64-byte hash) is passed through this function to produce the signing scalar `r`.
-- The first two postconditions enforce canonical encoding, whose absence caused signature malleability vulnerabilities in several widely-used libraries including OpenSSL and tinyssh (RFC 8032 §5.1.7).
-- The third postcondition is a probabilistic security property: if the input is uniformly distributed (as a hash output is), the output scalar is also uniformly distributed. This is the property required for **nonce secrecy** — a biased nonce in EdDSA directly leaks the private key (as in the ECDSA PlayStation 3 attack).
+- Reduces a 64-byte SHA-512 hash to a canonical EdDSA signing scalar `r`.
+- First two postconditions: canonical encoding; absent canonicality caused malleability vulnerabilities in OpenSSL and tinyssh (RFC 8032 §5.1.7).
+- Third postcondition: uniform input → uniform output, required for nonce secrecy (biased nonce leaks the private key, cf. ECDSA PS3 attack).
 
 ---
 
@@ -86,9 +80,8 @@ pub fn decompress(&self) -> (result: Option<EdwardsPoint>)
         ),
 ```
 
-- Ed25519 signature verification begins by decompressing the public key and signature point from their 32-byte encodings — this is that step.
-- The postcondition has four conditions: success iff the y-coordinate is valid on the curve, correct Y, Z=1, and sign bit matching — together they fully characterise what a valid decompression means.
-- Used in every SSH connection, TLS 1.3 handshake, and code-signing check that uses Ed25519.
+- The decompression step in every Ed25519 verification (SSH, TLS 1.3, code signing).
+- Four postconditions: success iff y is on the curve, correct Y, Z=1, sign bit match — fully characterising valid decompression.
 
 ---
 
@@ -111,9 +104,9 @@ u1 = (Z+Y)(Z−Y),  u2 = X·Y,  invsqrt = 1/√(u1·u2²)
 → serialize to 32 bytes
 ```
 
-- Ristretto255 is the prime-order group abstraction over Curve25519 (cofactor 8); it eliminates the cofactor problem that would otherwise allow forged proofs. The `dalek-cryptography/bulletproofs` crate builds Bulletproofs and Pedersen commitments over it. `compress` is called every time a group element is serialised.
-- The postcondition is a functional-correctness theorem linking imperative Rust to the [Ristretto RFC (RFC 9496)](https://datatracker.ietf.org/doc/html/rfc9496) mathematical spec.
-- Builds directly on Benchmark 1: once `mul` is axiomatized, all remaining field ops follow the same pattern.
+- Ristretto255 eliminates Curve25519's cofactor-8 problem; used in `bulletproofs` (Bulletproofs, Pedersen commitments). Called on every serialised group element.
+- Postcondition links the implementation to the [Ristretto RFC (RFC 9496)](https://datatracker.ietf.org/doc/html/rfc9496) spec.
+- Builds on B1: once `mul` is axiomatized, remaining field ops follow the same pattern.
 
 ---
 
@@ -133,31 +126,8 @@ pub fn mul_clamped(self, bytes: [u8; 32]) -> (result: Self)
     }),
 ```
 
-- This is the core scalar multiplication step of X25519, the key exchange used in TLS 1.3, Signal, WireGuard, and SSH.
-- The postcondition states functional correctness of this step: the output u-coordinate equals `[n]P` on the Montgomery curve.
-- Verifying this in Boole would give a mechanically checked proof that the arithmetic core of X25519 is correct.
-
----
-
-## Benchmark 6 — `compress_u32`
-
-**~55 lines** (sha256/soft/compact.rs) · ~45 exec statements · source: [RustCrypto/hashes](https://github.com/RustCrypto/hashes/blob/master/sha2/src/sha256/soft/compact.rs)
-
-```rust
-fn compress_u32(state: &mut [u32; 8], mut block: [u32; 16]) { ... }
-```
-
-The spec we write in Boole:
-
-```
-ensures *state == sha256_compress_spec(initial_state, block)
-```
-
-where `sha256_compress_spec` is the FIPS 180-4 round function unrolled over 64 iterations, using the SHA-256 constants `K32`.
-
-- SHA-256 underpins HMAC-SHA-256, TLS 1.3 key derivation, and Bitcoin's double-SHA-256 proof-of-work; `compress_u32` is among the most widely deployed hash primitives in existence.
-- Unlike B1–B5 (Verus-annotated), the spec is written by us in Boole directly. The 64-round loop with in-place message schedule and eight chained `u32` state variables exercises `bv32` arithmetic, `rotate_right`, array indexing, loop invariants, and wrapping addition.
-- New language feature required: `rotate_right` (`bvrotr` in SMT-LIB).
+- Core scalar multiplication of X25519 (TLS 1.3, Signal, WireGuard, SSH).
+- Postcondition: output u-coordinate equals `[n]P` on the Montgomery curve.
 
 ---
 
@@ -173,30 +143,28 @@ only once all gaps for that benchmark are closed. Until then, gap-specific small
 seeds live in
 [`StrataTest/Languages/Boole/FeatureRequests/`](../StrataTest/Languages/Boole/FeatureRequests/).
 
-**Shared by all six benchmarks:**
+**Shared by all five benchmarks:**
 
-| Gap | FR# | Status | Gap seed |
-|-----|-----|--------|----------|
-| Struct/record field access | #13 | ○ open | [`struct_field_access.lean`](../StrataTest/Languages/Boole/FeatureRequests/struct_field_access.lean) |
-| Native `nat` support | #10 | ○ open | [`nat_int_boundary.lean`](../StrataTest/Languages/Boole/FeatureRequests/nat_int_boundary.lean) |
-| Recursive spec functions over sequences | #11 | ○ open | [`seq_slicing.lean`](../StrataTest/Languages/Boole/FeatureRequests/seq_slicing.lean) — basic ops (`Sequence.skip`, `Sequence.subrange`, `Sequence.take`, etc.) are implemented; remaining gap is recursive spec functions that walk a sequence element by element: `bytes_seq_as_nat` (needed by B2 and B5), `seq_as_nat_52` (B1), and `field_element_from_bytes` (B3, B4); these need int-based termination proofs (blocked on `@[cases]`-free recursion over `int`) |
+| Gap | FR# | Status | Notes |
+|-----|-----|--------|-------|
+| Struct/record field access | #13 | ○ open | Boole has no record types with named field access; see [`struct_field_access.lean`](../StrataTest/Languages/Boole/FeatureRequests/struct_field_access.lean) |
+| Native `nat` support | #10 | ○ open | `nat` must be declared abstract with manual coercion axioms; see [`nat_int_boundary.lean`](../StrataTest/Languages/Boole/FeatureRequests/nat_int_boundary.lean) |
+| Recursive spec functions over sequences | #11 | ○ open | Basic sequence ops (`skip`, `subrange`, `take`) work; gap is recursive functions with int-based termination — blocks `bytes_seq_as_nat` (B2, B5), `seq_as_nat_52` (B1), `field_element_from_bytes` (B3, B4); see [`seq_slicing.lean`](../StrataTest/Languages/Boole/FeatureRequests/seq_slicing.lean) |
 
 **Additional gaps per benchmark:**
 
 | # | Gap | FR# | Status | Notes |
 |---|-----|-----|--------|-------|
-| 1 | `u128` as `int` | — | ○ open | 25 cross-limb products; no new language feature needed once struct access lands — model `u64`/`u128` limbs as `int` |
-| 2 | `[u8; 64]` byte arrays | — | ○ open | Model as `Map int bv8`; pattern demonstrated in [`bitvector_ops.lean`](../StrataTest/Languages/Boole/bitvector_ops.lean) |
-| 2 | `reduce()` spec function | — | ✓ done | Axiom seed [`scalar_reduce.lean`](../StrataTest/Languages/Boole/FeatureRequests/scalar_reduce.lean) verifies with abstract `ByteArray32`/`Scalar` types; `bytes_seq_as_nat` stays abstract — spelling it out recursively requires int-based termination over sequences (open gap) |
-| 2 | `is_uniform_scalar` axiom | — | ○ open | Probabilistic postcondition; needs abstract `is_uniform_bytes` / `is_uniform_scalar` predicates as Boole axioms |
-| 3 | `Option<EdwardsPoint>` return | — | ○ open | Encoding pattern demonstrated in [`option_matches.lean`](../StrataTest/Languages/Boole/FeatureRequests/option_matches.lean) and [`datatypes_and_selectors.lean`](../StrataTest/Languages/Boole/FeatureRequests/datatypes_and_selectors.lean) |
+| 1 | `u128` intermediate products | — | ○ open | 25 u64×u64 cross-limb products are u128 in Rust; in Boole, model as `int` — no separate feature needed, resolves with Gap #13 |
+| 1 | `FieldElement51.limbs: [u64; 5]` | #13 | ○ open | Sub-case of Gap #13: `limbs` is a struct field whose type is itself a fixed-size array. Planned encoding: flatten into five named `int` fields (`limb0`…`limb4`) rather than `Map int bv64` — same gap, not a separate one |
+| 2 | `[u8; 64]` byte arrays | #25 | ○ open | `input: &[u8; 64]` as `Map int bv8`; SMT backend resolved by PR #795; remaining gap is Boole syntax (initializer, write-back) |
+| 5 | `[u8; 32]` byte arrays | #25 | ○ open | Same as B2; SMT backend resolved by PR #795 |
+| 2 | `reduce()` spec function | — | ✓ done | Axiom pattern verified in [`scalar_reduce.lean`](../StrataTest/Languages/Boole/FeatureRequests/scalar_reduce.lean) with abstract `ByteArray64`/`Scalar`; `bytes_seq_as_nat` blocked on Gap #11 |
+| 2 | `is_uniform_scalar` axiom | — | ○ open | Probabilistic postcondition needs abstract `is_uniform_bytes`/`is_uniform_scalar` predicates as Boole axioms |
+| 3 | `Option<EdwardsPoint>` return | — | ○ open | Boole has no native `Option<T>` type and no `matches` destructuring in spec clauses; see [`option_matches.lean`](../StrataTest/Languages/Boole/FeatureRequests/option_matches.lean) |
 | 3 | `field_square` / `sqrt_ratio_i` axioms | — | ○ open | Needed for the full decompress body |
-| 4 | Pair return type | — | ○ open | `invsqrt()` returns `(bool, FieldElement51)`; needs tuple/pair type support |
+| 4 | Pair return type | — | ○ open | `invsqrt()` returns `(bool, FieldElement51)`; needs tuple/pair type support in Boole |
 | 4 | Field op axioms | — | ○ open | `add`, `sub`, `square`, `invsqrt`, `conditional_negate`, `as_bytes` — each needs a Boole axiom |
-| 5 | Inline `let`-block postcondition | — | ✓ done | Implemented; see [`embedded_postcondition.lean`](../StrataTest/Languages/Boole/embedded_postcondition.lean) and BooleFeatureRequests.md |
-| 5 | Montgomery ladder invariant | — | ○ open | Requires group-law axioms (Costello-Smith 2017, eq. 4); [`montgomery_loop_invariant.lean`](../StrataTest/Languages/Boole/FeatureRequests/montgomery_loop_invariant.lean) covers the relational loop pattern |
-| 6 | `rotate_right` / `bvrotr` | — | ○ open | `u32::rotate_right(n)` used 6× in the round function; needs `Bv{N}.RotR` Core op and Boole syntax |
-| 6 | `[u32; N]` arrays as `Map int bv32` | — | ○ open | Same pattern as `[u8; 64]` in B2; modular index arithmetic `i % 16` also needed |
-| 6 | 64-round loop invariant | — | ○ open | State and message-schedule invariant across all 64 rounds; blocked on loop invariant support |
-| 6 | SHA-256 round spec axiom | — | ○ open | `sha256_compress_spec` needs to be declared as a Boole axiom linking the imperative loop to the FIPS 180-4 spec |
+| 5 | Inline `let`-block postcondition | — | ✓ done | Implemented; see [`embedded_postcondition.lean`](../StrataTest/Languages/Boole/embedded_postcondition.lean) |
+| 5 | Montgomery ladder invariant | — | ○ open | Needs Montgomery curve differential addition axioms (Costello-Smith 2017, eq. 4); loop structure demonstrated in [`montgomery_loop_invariant.lean`](../StrataTest/Languages/Boole/FeatureRequests/montgomery_loop_invariant.lean) |
 

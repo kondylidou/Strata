@@ -11,15 +11,16 @@ open Strata
 /-
 Near-upstream anchor:
 - Source: dalek-lite `curve25519-dalek/src/scalar.rs`
-  `Scalar::from_bytes_mod_order` (line 273–291) — reduces a 32-byte input
-  modulo the group order ℓ and returns a canonical scalar:
-    pub fn from_bytes_mod_order(bytes: [u8; 32]) -> (result: Scalar)
+  `Scalar::from_bytes_mod_order_wide` (line 300–348) — reduces a 64-byte input
+  (size of a SHA-512 hash output) modulo the group order ℓ and returns a
+  canonical scalar. This is Benchmark 2; the axiom pattern also covers the
+  32-byte variant `from_bytes_mod_order` (line 273–291):
+    pub fn from_bytes_mod_order_wide(input: &[u8; 64]) -> (result: Scalar)
         ensures
-            scalar_as_canonical(&result) == u8_32_as_group_canonical(bytes),
+            scalar_as_canonical(&result) == group_canonical(bytes_seq_as_nat(input@)),
             is_canonical_scalar(&result),
     {
-        let s_unreduced = Scalar { bytes };
-        s_unreduced.reduce()
+        // ... Barrett reduction over 9 limbs
     }
 
 Implemented:
@@ -43,7 +44,7 @@ private def scalarReduceSeed : Strata.Program :=
 #strata
 program Boole;
 
-type ByteArray32;
+type ByteArray64;
 type Scalar;
 
 function reduce(b: ByteArray32) : Scalar;
