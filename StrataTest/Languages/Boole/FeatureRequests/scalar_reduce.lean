@@ -54,11 +54,11 @@ spec {
 #end
 
 /-- info:
-Obligation: from_bytes_mod_order_wide_ensures_2_2014
+Obligation: from_bytes_mod_order_wide_ensures_2_1528
 Property: assert
 Result: ✅ pass
 
-Obligation: from_bytes_mod_order_wide_ensures_3_2088
+Obligation: from_bytes_mod_order_wide_ensures_3_1602
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in

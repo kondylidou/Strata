@@ -34,23 +34,23 @@ private def embeddedPostconditionSeed : Strata.Program :=
 #strata
 program Boole;
 
-function scaled(n: int, base: int) : int;
-axiom (∀ n: int, base: int . scaled(n, base) == n * base);
+function shifted(n: int, k: int) : int;
+axiom (∀ n: int, k: int . shifted(n, k) == n + k);
 
-function reduced(x: int) : int;
-axiom (∀ x: int . reduced(x) == x mod 101);
+function negated(x: int) : int;
+axiom (∀ x: int . negated(x) == -x);
 
-procedure scale_mod_p(n: int, base: int) returns (r: int)
+procedure shift_negate(n: int, k: int) returns (r: int)
 spec {
-  ensures let s : int := scaled(n, base) in
-          let d : int := reduced(s) in
+  ensures let s : int := shifted(n, k) in
+          let d : int := negated(s) in
           r == d;
 }
-{ r := (n * base) mod 101; };
+{ r := -(n + k); };
 #end
 
 /-- info:
-Obligation: scale_mod_p_ensures_2_1499
+Obligation: shift_negate_ensures_2_1480
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in
