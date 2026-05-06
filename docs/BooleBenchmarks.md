@@ -149,7 +149,7 @@ seeds live in
 |-----|-----|--------|-------|
 | Struct/record field access | #13 | ○ open | Boole has no record types with named field access; see [`struct_field_access.lean`](../StrataTest/Languages/Boole/FeatureRequests/struct_field_access.lean) |
 | Native `nat` support | #10 | ○ open | `nat` must be declared abstract with manual coercion axioms; see [`nat_int_boundary.lean`](../StrataTest/Languages/Boole/FeatureRequests/nat_int_boundary.lean) |
-| Recursive spec functions over sequences | #11 | ○ open | Basic sequence ops (`skip`, `subrange`, `take`) work; gap is recursive functions with int-based termination — blocks `bytes_seq_as_nat` (B2, B5), `seq_as_nat_52` (B1), `field_element_from_bytes` (B3, B4); see [`seq_slicing.lean`](../StrataTest/Languages/Boole/FeatureRequests/seq_slicing.lean) |
+| Recursive spec functions over sequences | #11 | ○ open | Gap is recursion on `Sequence.length` (an `int`) — blocks `u8_64_as_group_canonical` (B2, B5), `seq_as_nat_52` (B1), `field_element_from_bytes` (B3, B4). Defined recursively in the original Verus source; must be supported faithfully. #1092 is ADT-only and does not unblock this; needs a follow-up PR after #1092. See [`seq_slicing.lean`](../StrataTest/Languages/Boole/FeatureRequests/seq_slicing.lean) |
 
 **Additional gaps per benchmark:**
 
@@ -159,7 +159,7 @@ seeds live in
 | 1 | `FieldElement51.limbs: [u64; 5]` | #13 | ○ open | Sub-case of Gap #13: `limbs` is a struct field whose type is itself a fixed-size array. Planned encoding: flatten into five named `int` fields (`limb0`…`limb4`) rather than `Map int bv64` — same gap, not a separate one |
 | 2 | `[u8; 64]` byte arrays | #25 | ○ open | `input: &[u8; 64]` as `Map int bv8`; SMT backend resolved by PR #795; remaining gap is Boole syntax (initializer, write-back) |
 | 5 | `[u8; 32]` byte arrays | #25 | ○ open | Same as B2; SMT backend resolved by PR #795 |
-| 2 | `reduce()` spec function | — | ✓ done | Axiom pattern verified in [`scalar_reduce.lean`](../StrataTest/Languages/Boole/FeatureRequests/scalar_reduce.lean) with abstract `ByteArray64`/`Scalar`; `bytes_seq_as_nat` blocked on Gap #11 |
+| 2 | `reduce()` spec function | — | ✓ done | Axiom pattern verified in [`scalar_reduce.lean`](../StrataTest/Languages/Boole/FeatureRequests/scalar_reduce.lean) with abstract `ByteArray64`/`Scalar`; `u8_64_as_group_canonical` (`bytes_seq_as_nat` in dalek-lite) stays abstract pending Gap #11 |
 | 2 | `is_uniform_scalar` axiom | — | ○ open | Probabilistic postcondition needs abstract `is_uniform_bytes`/`is_uniform_scalar` predicates as Boole axioms |
 | 3 | `Option<EdwardsPoint>` return | — | ○ open | Boole has no native `Option<T>` type and no `matches` destructuring in spec clauses; see [`option_matches.lean`](../StrataTest/Languages/Boole/FeatureRequests/option_matches.lean) |
 | 3 | `field_square` / `sqrt_ratio_i` axioms | — | ○ open | Needed for the full decompress body |

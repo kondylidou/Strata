@@ -40,14 +40,14 @@ This document tracks the selected Boole feature-request seeds kept under
   - Benchmark: [`bitvector_ops.lean`](../StrataTest/Languages/Boole/bitvector_ops.lean).
 - **Mutual recursion over datatypes** (#599)
   - `rec function ... ;` blocks work end-to-end for structural recursion over datatypes.
-  - Remaining gap: mutual recursion over `int` still requires function-level `decreases` and int-based termination.
+  - Remaining gap: mutual recursion over `int` — see #17.
   - Benchmark: [`mutual_recursion.lean`](../StrataTest/Languages/Boole/FeatureRequests/mutual_recursion.lean) (`even`/`odd` over `MyNat`).
 - **`choose` syntax**
   - `w := choose z : T :: pred(z)` desugars to `havoc w; assume pred[z/w]`.
   - Benchmark: [`choose_operator.lean`](../StrataTest/Languages/Boole/choose_operator.lean).
 - **`decreases` annotation on functions, procedures, and `for` loops**
   - Accepted in function preconds, `spec {}` blocks, procedure headers, and `for v := init to/downto limit` loops; forwarded to the Core while-loop measure field. Not separately verified in the SMT path.
-  - Remaining gap: int-based termination for recursive functions.
+  - Remaining gap: int-based termination for recursive spec functions (e.g. `fib`, `reconstruct` over NAF, `u8_64_as_group_canonical`, `field_element_from_bytes`). These are defined recursively in the original Verus source and must remain so — we need to support them faithfully. #1092 is ADT-only (no built-in `Nat`); int/sequence termination needs a follow-up PR after #1092.
   - Benchmark: [`decreases_metadata.lean`](../StrataTest/Languages/Boole/FeatureRequests/decreases_metadata.lean).
 - **`Sequence T` type and slicing ops**
   - All 8 Core inherited ops wired up; wrappers added for `Sequence.skip`, `Sequence.dropFirst`, `Sequence.subrange`.
@@ -93,7 +93,7 @@ This document tracks the selected Boole feature-request seeds kept under
 
 15. **Higher-order / lambda / closure support**: Implemented. Remaining gap: first-class function values as procedure parameters or local variables.
 16. **`choose`**: Implemented.
-17. **Mutual recursion / forward references**: Implemented for functions over datatypes (structural recursion via `@[cases]`). Remaining gap: mutual recursion over `int` or other non-datatype types requiring an explicit `decreases` clause.
+17. **Mutual recursion / forward references**: Implemented for functions over datatypes (structural recursion via `@[cases]`). Remaining gap: mutual recursion over `int` or other non-datatype types — blocked by int-based termination (same as Gap #11).
 18. **Trait-spec symbol resolution**: Preserve trait-spec symbols across module boundaries.
 19. **Trait / interface with spec and proof methods**: `interface` declarations bundling `spec function` and `lemma` members, with `matches` pattern syntax in `ensures` and `external_body`-style trusted bodies. Confirmed as the backbone of Vest combinators.
 20. **Reusable math spec support**: `pow2`, summation, and modular arithmetic helpers for functional specs; avoids re-axiomatising arithmetic in each seed.
@@ -135,9 +135,9 @@ These are the curated one-gap Boole seeds.
 | [`montgomery_loop_invariant.lean`](../StrataTest/Languages/Boole/FeatureRequests/montgomery_loop_invariant.lean) | Relational loop invariants over two co-evolving variables | dalek-lite `montgomery.rs` `mul_bits_be` (Montgomery ladder) | Linear arithmetic case: implemented (#1075); elliptic curve case: open — requires group-law axioms (Costello-Smith 2017, eq. 4); whether cvc5 closes the invariant with those axioms is untested |
 | [`bitvector_ops.lean`](../StrataTest/Languages/Boole/bitvector_ops.lean) | Bitwise operators on `bvN` types | dalek-lite `scalar_specs.rs` | Implemented (#970) |
 | [`bitvector_proof_mode.lean`](../StrataTest/Languages/Boole/FeatureRequests/bitvector_proof_mode.lean) | `by (bit_vector)` proof mode | VeruSAGE-Bench Vest `leb128` | Active |
-| [`seq_slicing.lean`](../StrataTest/Languages/Boole/FeatureRequests/seq_slicing.lean) | Sequence slicing (`subrange`, `skip`, `take`, `drop_first`) and all 8 Core `Sequence.*` ops | dalek-lite `scalar_specs.rs`, `core_specs.rs`; Vest `leb128`, `repetition` | Implemented (#1075); remaining gap: recursive spec functions over sequences need int-based termination proofs |
-| [`scalar_reduce.lean`](../StrataTest/Languages/Boole/FeatureRequests/scalar_reduce.lean) | `reduce()` spec axiom for B2 (`Scalar::from_bytes_mod_order_wide`) | dalek-lite `scalar.rs` | Implemented (#1075); `bytes_seq_as_nat` stays abstract pending Gap #11 |
+| [`seq_slicing.lean`](../StrataTest/Languages/Boole/FeatureRequests/seq_slicing.lean) | Sequence slicing (`subrange`, `skip`, `take`, `drop_first`) and all 8 Core `Sequence.*` ops | dalek-lite `scalar_specs.rs`, `core_specs.rs`; Vest `leb128`, `repetition` | Implemented (#1075); remaining gap: recursive spec functions over sequences need int-based termination (Gap #11); original Verus definitions must be supported as-is |
+| [`scalar_reduce.lean`](../StrataTest/Languages/Boole/FeatureRequests/scalar_reduce.lean) | `reduce()` spec axiom for B2 (`Scalar::from_bytes_mod_order_wide`) | dalek-lite `scalar.rs` | Implemented (#1075); `u8_64_as_group_canonical` stays abstract pending Gap #11 — recursive in original Verus, cannot substitute a closed-form |
 | [`struct_field_access.lean`](../StrataTest/Languages/Boole/FeatureRequests/struct_field_access.lean) | Struct/record types with named field access | dalek-lite `field_specs.rs`, `edwards_specs.rs` | Active |
 | [`trait_spec_methods.lean`](../StrataTest/Languages/Boole/FeatureRequests/trait_spec_methods.lean) | Trait / interface with spec and proof methods; `matches` in `ensures` | VeruSAGE-Bench Vest `SecureSpecCombinator` | Active |
 | [`option_matches.lean`](../StrataTest/Languages/Boole/FeatureRequests/option_matches.lean) | `Option<T>` in spec functions; `matches` in `ensures`/`exists` | VeruSAGE-Bench Vest `SecureSpecCombinator`, `leb128` | Active |
-| [`sha256_compact_indexed.lean`](../StrataTest/Languages/Boole/FeatureRequests/sha256_compact_indexed.lean) | Iterator protocol lowering (#27), array syntax (#25), slice types (#26), `bv` rotate primitives (#28) | RustCrypto SHA-256 compact port (indexed `Sequence` encoding) | Active — open: `compress_u32` modifies check, `Sequence` initialization (`Sequence.empty`, `Sequence.build`) |
+| [`sha256_compact_indexed.lean`](../StrataTest/Languages/Boole/FeatureRequests/sha256_compact_indexed.lean) | Iterator protocol lowering (#27), array syntax (#25), slice types (#26), `bv` rotate primitives (#28) | RustCrypto SHA-256 compact port (indexed `Sequence` encoding) | Active — open: `compress_u32` modifies check; `Sequence` initialization resolved (#1075: `Sequence.empty_bv32`) |
