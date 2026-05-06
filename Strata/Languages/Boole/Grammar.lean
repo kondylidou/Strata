@@ -98,10 +98,14 @@ fn let_in_expr (v : MonoBind, value : Expr, @[scope(v)] body : bool) : bool =>
 // that would break `s ".skip(" n ")"` method-call style (the DDM's init
 // dialect parses `id.id` as a qualified ident before Expr-level trailing
 // rules can apply).
-// Typed empty-sequence constant for bv32. Sequence.empty is 0-ary polymorphic
-// which the DDM parser cannot resolve without arguments; per-type versions for
-// other element types can be added when needed.
-fn seq_empty_bv32 () : Sequence bv32 => "Sequence.empty";
+// Typed empty-sequence constants. `Sequence.empty` is 0-ary polymorphic which
+// the DDM parser cannot resolve without arguments, so each element type uses
+// a distinct token `Sequence.empty_<type>`.
+fn seq_empty_bv8  () : Sequence bv8  => "Sequence.empty_bv8";
+fn seq_empty_bv16 () : Sequence bv16 => "Sequence.empty_bv16";
+fn seq_empty_bv32 () : Sequence bv32 => "Sequence.empty_bv32";
+fn seq_empty_bv64 () : Sequence bv64 => "Sequence.empty_bv64";
+fn seq_empty_int  () : Sequence int  => "Sequence.empty_int";
 
 fn seq_skip (A : Type, s : Sequence A, n : int) : Sequence A =>
   "Sequence.skip" "(" s ", " n ")";
@@ -121,14 +125,14 @@ op for_statement (v : MonoBind, init : Expr,
   "for " "(" v " := " init "; " guard "; " step ")" invs body;
 
 op for_to_by_statement (v : MonoBind, init : Expr, limit : Expr,
-  @[scope(v)] step : Option Step, @[scope(v)] invs : Invariants,
-  @[scope(v)] body : Block) : Statement =>
-  "for " v " := " init " to " limit step invs body;
+  @[scope(v)] step : Option Step, @[scope(v)] decr : Option Measure,
+  @[scope(v)] invs : Invariants, @[scope(v)] body : Block) : Statement =>
+  "for " v " := " init " to " limit step decr invs body;
 
 op for_down_to_by_statement (v : MonoBind, init : Expr, limit : Expr,
-  @[scope(v)] step : Option Step, @[scope(v)] invs : Invariants,
-  @[scope(v)] body : Block) : Statement =>
-  "for " v " := " init " downto " limit step invs body;
+  @[scope(v)] step : Option Step, @[scope(v)] decr : Option Measure,
+  @[scope(v)] invs : Invariants, @[scope(v)] body : Block) : Statement =>
+  "for " v " := " init " downto " limit step decr invs body;
 
 category Program;
 op prog (commands : SpacePrefixSepBy Command) : Program =>

@@ -40,13 +40,14 @@ This document tracks the selected Boole feature-request seeds kept under
 - **`choose` syntax**
   - `w := choose z : T :: pred(z)` desugars to `havoc w; assume pred[z/w]`.
   - Benchmark: [`choose_operator.lean`](../StrataTest/Languages/Boole/choose_operator.lean).
-- **`decreases` annotation on functions and procedures**
-  - Parsed in function preconds, `spec {}` blocks, and as an optional procedure `Measure`; silently dropped by the lowering. Termination is not separately verified in the SMT path.
-  - Remaining gap: recursive functions over `int` still require `@[cases]`; int-based termination is not yet supported.
+- **`decreases` annotation on functions, procedures, and `for` loops**
+  - Accepted in function preconds, `spec {}` blocks, procedure headers, and `for v := init to/downto limit` loops; forwarded to the Core while-loop measure field. Not separately verified in the SMT path.
+  - Remaining gap: int-based termination for recursive functions.
   - Benchmark: [`decreases_metadata.lean`](../StrataTest/Languages/Boole/FeatureRequests/decreases_metadata.lean).
 - **`Sequence T` type and slicing ops**
-  - All 8 Core inherited ops wired up; three Boole-specific wrappers added: `Sequence.skip`, `Sequence.dropFirst`, `Sequence.subrange`.
-  - Remaining gap: recursive spec functions over sequences need int-based termination proofs (blocked on `@[cases]`-free recursion over `int`).
+  - All 8 Core inherited ops wired up; wrappers added for `Sequence.skip`, `Sequence.dropFirst`, `Sequence.subrange`.
+  - Typed empty-sequence constants: `Sequence.empty_bv8/bv16/bv32/bv64/int`. Each needs a distinct token — 0-ary polymorphic `Sequence.empty` has no arguments to infer the type from.
+  - Remaining gap: recursive spec functions over sequences need int-based termination proofs.
   - Benchmark: [`seq_slicing.lean`](../StrataTest/Languages/Boole/FeatureRequests/seq_slicing.lean).
 - **Inline `let`-block postconditions**
   - `ensures ({ let x = e; ... })` now lowers correctly; enables dalek-lite's `mul_clamped` postcondition style.
@@ -133,4 +134,4 @@ These are the curated one-gap Boole seeds.
 | [`struct_field_access.lean`](../StrataTest/Languages/Boole/FeatureRequests/struct_field_access.lean) | Struct/record types with named field access | dalek-lite `field_specs.rs`, `edwards_specs.rs` | Active |
 | [`trait_spec_methods.lean`](../StrataTest/Languages/Boole/FeatureRequests/trait_spec_methods.lean) | Trait / interface with spec and proof methods; `matches` in `ensures` | VeruSAGE-Bench Vest `SecureSpecCombinator` | Active |
 | [`option_matches.lean`](../StrataTest/Languages/Boole/FeatureRequests/option_matches.lean) | `Option<T>` in spec functions; `matches` in `ensures`/`exists` | VeruSAGE-Bench Vest `SecureSpecCombinator`, `leb128` | Active |
-| `sha256_compact.rs` *(no Lean seed yet)* | Iterator protocol lowering (#27), array syntax (#25), slice types (#26), `bv` rotate primitives (#28) | RustCrypto SHA-256 compact port | Active |
+| [`sha256_compact_indexed.lean`](../StrataTest/Languages/Boole/FeatureRequests/sha256_compact_indexed.lean) | Iterator protocol lowering (#27), array syntax (#25), slice types (#26), `bv` rotate primitives (#28) | RustCrypto SHA-256 compact port (indexed `Sequence` encoding) | Active — open: `compress_u32` modifies check, `Sequence` initialization (`Sequence.empty`, `Sequence.build`) |
