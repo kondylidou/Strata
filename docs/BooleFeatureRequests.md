@@ -30,9 +30,10 @@ This document tracks the selected Boole feature-request seeds kept under
   - `&`, `|`, `^`, `>>` (UShr), `>>s` (SShr), `<<`, `~` lower to `Bv{N}.And/Or/Xor/UShr/SShr/Shl/Not` Core ops.
   - `bvWidth` helper extracts the bit-width from the Boole type and dispatches to the right-sized op.
   - Benchmark: [`bitvector_ops.lean`](../StrataTest/Languages/Boole/bitvector_ops.lean) (X25519 scalar clamping with `bv8` `&` and `|`).
-- **Signed bitvector comparisons** (#1075) (`<s`, `<=s`, `>s`, `>=s`)
-  - `a <s b` etc. lower via `toCoreBvBin` to `Bv{N}.SLt/SLe/SGt/SGe`; four `toCoreExpr` cases added to `Verify.lean`.
-  - Benchmark: [`bitvector_ops.lean`](../StrataTest/Languages/Boole/bitvector_ops.lean) (`bv_signed_cmp`, 7 postconditions).
+- **Bitvector comparisons** (#1075)
+  - Unsigned (`<`, `<=`, `>`, `>=`) lower to `Bv{N}.ULt/ULe/UGt/UGe` via `toBvCmpOp` (plain comparisons on bitvector operands default to unsigned).
+  - Signed (`<s`, `<=s`, `>s`, `>=s`) lower to `Bv{N}.SLt/SLe/SGt/SGe`.
+  - Benchmark: [`bitvector_ops.lean`](../StrataTest/Languages/Boole/bitvector_ops.lean).
 - **Mutual recursion over datatypes** (#599)
   - `rec function ... ;` blocks work end-to-end for structural recursion over datatypes.
   - Remaining gap: mutual recursion over `int` still requires function-level `decreases` and int-based termination.
