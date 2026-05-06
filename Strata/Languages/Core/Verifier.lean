@@ -103,14 +103,14 @@ def encodeCore (ctx : Core.SMT.Context) (prelude : SolverM Unit)
     -- Satisfiability check: P ∧ Q satisfiable?
     Solver.comment "Satisfiability"
     Imperative.SMT.addLocationInfo (P := Core.Expression) (md := md)
-      (message := ("sat-message", s!"\"Property can be satisfied\""))
+      (message := ("sat-message", "Property can be satisfied"))
     let obligationStr ← Solver.termToSMTString obligationId
     let _ ← Solver.checkSatAssuming [obligationStr] ids
 
     -- Validity check: P ∧ ¬Q satisfiable?
     Solver.comment "Validity"
     Imperative.SMT.addLocationInfo (P := Core.Expression) (md := md)
-      (message := ("unsat-message", s!"\"Property is always true\""))
+      (message := ("unsat-message", "Property is always true"))
     let negObligationStr := s!"(not {obligationStr})"
     let _ ← Solver.checkSatAssuming [negObligationStr] ids
   else
@@ -118,21 +118,24 @@ def encodeCore (ctx : Core.SMT.Context) (prelude : SolverM Unit)
       -- P ∧ Q satisfiable?
       Solver.comment "Satisfiability"
       Imperative.SMT.addLocationInfo (P := Core.Expression) (md := md)
-        (message := ("sat-message", s!"\"Property can be satisfied\""))
+        (message := ("sat-message", "Property can be satisfied"))
       Solver.assert obligationId
       let _ ← Solver.checkSat ids
     else if validityCheck then
       -- P ∧ ¬Q satisfiable?
       Solver.comment "Validity"
       Imperative.SMT.addLocationInfo (P := Core.Expression) (md := md)
-        (message := ("unsat-message", s!"\"Property is always true\""))
+        (message := ("unsat-message", "Property is always true"))
       Solver.assert (← encodeTerm (Factory.not obligationTerm) |>.run estate).1
       let _ ← Solver.checkSat ids
 
   -- Emit the property summary (or label) as the final message in the SMT-LIB output.
+  -- Use `setInfoString` so the value is quoted and escaped per SMT-LIB 2.6+
+  -- (doubled `""` for embedded quotes). C-style `\"` escaping would be rejected
+  -- by SMT-LIB consumers: backslash is a literal character in string contexts,
+  -- and the following `"` would close the string.
   let rawMsg := md.getPropertySummary.getD label
-  let escaped := rawMsg.replace "\\" "\\\\" |>.replace "\"" "\\\""
-  Solver.setInfo "final-message" s!"\"{escaped}\""
+  Solver.setInfoString "final-message" rawMsg
 
   return (ids, estate)
 
@@ -203,7 +206,7 @@ def dischargeObligation
   (label : String)
   (varDefinitions : List VarDefinition := [])
   (varDeclarations : List VarDeclaration := [])
-  : IO (Except Format (SMT.Result × SMT.Result × EncoderState)) := do
+  : IO (Except Imperative.SMT.SolverError (SMT.Result × SMT.Result × EncoderState)) := do
   -- CVC5 requires --incremental for multiple (check-sat) commands
   let baseFlags := getSolverFlags options
   let needsIncremental := satisfiabilityCheck && validityCheck
@@ -588,13 +591,26 @@ def LExprModel.format (model : LExprModel) : Format :=
 instance : ToFormat LExprModel where
   format := LExprModel.format
 
+/-- Classifies errors that prevent a verification condition from being resolved. -/
+inductive VCError where
+  | encoding (msg : String)
+  | solverTimeout (msg : String)
+  | solverCrash (msg : String)
+  deriving Repr, BEq
+
+instance : ToString VCError where
+  toString
+    | .encoding msg      => s!"SMT Encoding Error! {msg}"
+    | .solverTimeout msg => s!"Solver Timeout! {msg}"
+    | .solverCrash msg   => s!"SMT Solver Crash! {msg}"
+
 /--
 A collection of all information relevant to a verification condition's
 analysis.
 -/
 structure VCResult where
   obligation : Imperative.ProofObligation Expression
-  outcome : Except String VCOutcome := .error "not yet computed"
+  outcome : Except VCError VCOutcome
   estate : EncoderState := EncoderState.init
   verbose : VerboseMode := .normal
   checkLevel : CheckLevel := .minimal
@@ -625,7 +641,7 @@ instance : ToFormat VCResult where
     match r.outcome with
     | .error e =>
       let prop := r.obligation.property
-      f!"Obligation: {r.obligation.label}\nProperty: {prop}\nResult: 🚨 Implementation Error! {e}"
+      f!"Obligation: {r.obligation.label}\nProperty: {prop}\nResult: 🚨 {toString e}"
     | .ok outcome =>
       let modelFmt :=
         if r.verbose >= .models && !r.lexprModel.isEmpty then
@@ -644,7 +660,7 @@ def VCResult.formatOutcome (r : VCResult) : String :=
     let suffix := o.pathSummary prop r.checkLevel r.checkMode
     s!"{o.emoji prop r.checkLevel r.checkMode} \
        {o.label prop r.checkLevel r.checkMode}{suffix}"
-  | .error e => s!"🚨 {e}"
+  | .error e => s!"🚨 {toString e}"
 
 /-- Deductive-mode success: the assertion's validity is proven (`isPass`).
     Includes unreachable paths (vacuously true). For bug-finding mode,
@@ -668,8 +684,13 @@ def VCResult.isUnknown (vr : VCResult) : Bool :=
 
 def VCResult.isImplementationError (vr : VCResult) : Bool :=
   match vr.outcome with
-  | .error _ => true
-  | .ok _ => false
+  | .error (.encoding _) | .error (.solverCrash _) => true
+  | _ => false
+
+def VCResult.isTimeout (vr : VCResult) : Bool :=
+  match vr.outcome with
+  | .error (.solverTimeout _) => true
+  | _ => false
 
 def VCResult.isNotSuccess (vcResult : Core.VCResult) :=
   !Core.VCResult.isSuccess vcResult
@@ -946,11 +967,18 @@ def getObligationResult (assumptionTerms : List Term) (obligationTerm : Term)
           assumptionTerms obligationTerm ctx satisfiabilityCheck validityCheck
           (label := obligation.label) (varDefinitions := varDefinitions) (varDeclarations := varDeclarations))
   match ans with
-  | .error e =>
-    dbg_trace f!"\n\nObligation {obligation.label}: SMT Solver Invocation Error!\
-                 \n\nError: {e}\
-                 {if options.verbose >= .debug then prog else ""}"
-    .error <| DiagnosticModel.fromFormat e
+  | .error solverError =>
+    let vcError : VCError := match solverError with
+      | .timeout d => .solverTimeout d
+      | .crash d   => .solverCrash d
+    dbg_trace f!"\n\nObligation {obligation.label}: {vcError}\
+                 {if options.verbose >= VerboseMode.debug then prog else ""}"
+    return { obligation := obligation,
+             outcome := Except.error vcError,
+             verbose := options.verbose,
+             checkLevel := options.checkLevel,
+             checkMode := options.checkMode,
+             lexprModel := [] }
   | .ok (satResult, validityResult, estate) =>
     -- Convert unvalidated sat results to unknown when phases require validation
     let (adjSat, satPhaseLog) := satResult.adjustForPhases phases obligation
@@ -1043,7 +1071,7 @@ def verifySingleEnv (oblProgram : Program)
                                     checkLevel := options.checkLevel, checkMode := options.checkMode, lexprModel := [] }
         results := results.push result
         peResolvedCount := peResolvedCount + 1
-        if result.isFailure || result.isImplementationError then
+        if result.isFailure || result.isImplementationError || result.isTimeout then
           if options.verbose >= .debug then
             let prog := f!"\n\n[DEBUG] Evaluated program:\n{Core.formatProgram p}"
             dbg_trace f!"\n\nResult: {result}\n{prog}"
@@ -1058,9 +1086,8 @@ def verifySingleEnv (oblProgram : Program)
     smtEncodeNs := smtEncodeNs + (t3 - t2)
     match maybeTerms with
     | .error err =>
-      let err := f!"SMT Encoding Error! " ++ err
       let result := { obligation,
-                      outcome := .error (toString err),
+                      outcome := .error (.encoding (toString err)),
                       verbose := options.verbose,
                       checkLevel := options.checkLevel,
                       checkMode := options.checkMode,
@@ -1230,7 +1257,11 @@ def toDiagnosticModel (vcr : Core.VCResult)
     (phases : List Core.AbstractedPhase := []) : Option DiagnosticModel :=
   let fileRange := (Imperative.getFileRange vcr.obligation.metadata).getD default
   match vcr.outcome with
-  | .error msg => some { fileRange, message := s!"analysis error: {msg}", type := DiagnosticType.StrataBug }
+  | .error err =>
+    let diagType := match err with
+      | .solverTimeout _ => DiagnosticType.Warning
+      | _ => DiagnosticType.StrataBug
+    some { fileRange, message := s!"analysis error: {err}", type := diagType }
   | .ok outcome =>
     let message? : Option String :=
       if vcr.obligation.property == .cover then
