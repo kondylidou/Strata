@@ -98,6 +98,11 @@ fn let_in_expr (v : MonoBind, value : Expr, @[scope(v)] body : bool) : bool =>
 // that would break `s ".skip(" n ")"` method-call style (the DDM's init
 // dialect parses `id.id` as a qualified ident before Expr-level trailing
 // rules can apply).
+// Typed empty-sequence constant for bv32. Sequence.empty is 0-ary polymorphic
+// which the DDM parser cannot resolve without arguments; per-type versions for
+// other element types can be added when needed.
+fn seq_empty_bv32 () : Sequence bv32 => "Sequence.empty";
+
 fn seq_skip (A : Type, s : Sequence A, n : int) : Sequence A =>
   "Sequence.skip" "(" s ", " n ")";
 fn seq_drop_first (A : Type, s : Sequence A) : Sequence A =>

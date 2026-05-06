@@ -234,18 +234,6 @@ private def toCoreMonoBind (b : BooleDDM.MonoBind SourceRange) : TranslateM (Cor
   match b with
   | .mono_bind_mk _ ⟨_, n⟩ ty => return (mkIdent n, ← toCoreMonoType ty)
 
-def toCoreTypedUn (m : SourceRange) (ty : Boole.Type) (op : String) (a : Core.Expression.Expr) : TranslateM Core.Expression.Expr := do
-  let .int _ := ty
-    | throwAt m s!"Unsupported typed operator type: {repr ty}"
-  let iop : Core.Expression.Expr := .op () ⟨s!"Int.{op}", ()⟩ none
-  return .app () iop a
-
-def toCoreTypedBin (m : SourceRange) (ty : Boole.Type) (op : String) (a b : Core.Expression.Expr) : TranslateM Core.Expression.Expr := do
-  let .int _ := ty
-    | throwAt m s!"Unsupported typed operator type: {repr ty}"
-  let iop : Core.Expression.Expr := .op () ⟨s!"Int.{op}", ()⟩ none
-  return mkCoreApp iop [a, b]
-
 private def bvWidth (m : SourceRange) (ty : Boole.Type) : TranslateM Nat :=
   match ty with
   | .bv1 _  => return 1
@@ -262,6 +250,26 @@ private def toCoreBvUn (m : SourceRange) (ty : Boole.Type) (op : String) (a : Co
 private def toCoreBvBin (m : SourceRange) (ty : Boole.Type) (op : String) (a b : Core.Expression.Expr) : TranslateM Core.Expression.Expr := do
   let n ← bvWidth m ty
   return mkCoreApp (.op () ⟨s!"Bv{n}.{op}", ()⟩ none) [a, b]
+
+def toCoreTypedUn (m : SourceRange) (ty : Boole.Type) (op : String) (a : Core.Expression.Expr) : TranslateM Core.Expression.Expr := do
+  match ty with
+  | .int _ =>
+    let iop : Core.Expression.Expr := .op () ⟨s!"Int.{op}", ()⟩ none
+    return .app () iop a
+  | _ => toCoreBvUn m ty op a
+
+-- Bitvector comparison operators use unsigned variants by default (Le→ULe, etc.).
+-- Signed variants use the explicit bvslt/bvsle nodes.
+private def toBvCmpOp (op : String) : String :=
+  match op with
+  | "Le" => "ULe" | "Lt" => "ULt" | "Ge" => "UGe" | "Gt" => "UGt" | other => other
+
+def toCoreTypedBin (m : SourceRange) (ty : Boole.Type) (op : String) (a b : Core.Expression.Expr) : TranslateM Core.Expression.Expr := do
+  match ty with
+  | .int _ =>
+    let iop : Core.Expression.Expr := .op () ⟨s!"Int.{op}", ()⟩ none
+    return mkCoreApp iop [a, b]
+  | _ => toCoreBvBin m ty (toBvCmpOp op) a b
 
 private def toCoreExtensionalEq
     (m : SourceRange)
@@ -408,6 +416,8 @@ def toCoreExpr (e : Boole.Expr) : TranslateM Core.Expression.Expr := do
       let intSub : Core.Expression.Expr := .op () ⟨"Int.Sub", ()⟩ none
       return mkCoreApp Core.seqTakeOp
         [mkCoreApp Core.seqDropOp [s', lo'], mkCoreApp intSub [hi', lo']]
+  -- Typed empty-sequence constant (Sequence.empty for bv32; other types can be added when needed).
+  | .seq_empty_bv32 _ => return Core.seqEmptyOp
   -- Lambda abstraction: `fun x : T => body`  →  Core .abs
   | .lambda _ _ decls body => do
       let declsList := declListToList decls
@@ -440,6 +450,17 @@ def toCoreInvariants (is : BooleDDM.Invariants SourceRange) :
       | none => ""
     let e' ← toCoreExpr e
     return (lbl, e') :: (← toCoreInvariants rest)
+
+-- Return (leOp, addOp, subOp, one) appropriate for the loop variable type.
+private def forArithOps (ty : Lambda.LMonoTy) :
+    Core.Expression.Expr × Core.Expression.Expr × Core.Expression.Expr × Core.Expression.Expr :=
+  match ty with
+  | .bitvec n =>
+    (.op () ⟨s!"Bv{n}.ULe", ()⟩ none,
+     .op () ⟨s!"Bv{n}.Add", ()⟩ none,
+     .op () ⟨s!"Bv{n}.Sub", ()⟩ none,
+     .bitvecConst () n 1)
+  | _ => (Core.intLeOp, Core.intAddOp, Core.intSubOp, .intConst () 1)
 
 def lowerFor
     (m : SourceRange)
@@ -640,36 +661,38 @@ def toCoreStmt (s : BooleDDM.Statement SourceRange) : TranslateM Core.Statement 
         body
   | .for_to_by_statement m v init limit ⟨_, step?⟩ invs body =>
     let (id, ty) ← toCoreMonoBind v
+    let (leOp, addOp, _, one) := forArithOps ty
     let limitExpr ← toCoreExpr limit
     withBVars [id.name] do
       let initExpr ← toCoreExpr init
-      let guard := mkCoreApp Core.intLeOp [.fvar () id none, limitExpr]
+      let guard := mkCoreApp leOp [.fvar () id none, limitExpr]
       let stepExpr ← ((match step? with
-        | none => pure (.intConst () 1)
+        | none => pure one
         | some (.step _ e) => toCoreExpr e) : TranslateM Core.Expression.Expr)
       let body ← withBVars [] (toCoreBlock body)
       lowerFor
         m id ty
         initExpr
         guard
-        (mkCoreApp Core.intAddOp [.fvar () id none, stepExpr])
+        (mkCoreApp addOp [.fvar () id none, stepExpr])
         (← toCoreInvariants invs)
         body
   | .for_down_to_by_statement m v init limit ⟨_, step?⟩ invs body =>
     let (id, ty) ← toCoreMonoBind v
+    let (leOp, _, subOp, one) := forArithOps ty
     let limitExpr ← toCoreExpr limit
     withBVars [id.name] do
       let initExpr ← toCoreExpr init
-      let guard := mkCoreApp Core.intLeOp [limitExpr, .fvar () id none]
+      let guard := mkCoreApp leOp [limitExpr, .fvar () id none]
       let stepExpr ← ((match step? with
-        | none => pure (.intConst () 1)
+        | none => pure one
         | some (.step _ e) => toCoreExpr e) : TranslateM Core.Expression.Expr)
       let body ← withBVars [] (toCoreBlock body)
       lowerFor
         m id ty
         initExpr
         guard
-        (mkCoreApp Core.intSubOp [.fvar () id none, stepExpr])
+        (mkCoreApp subOp [.fvar () id none, stepExpr])
         (← toCoreInvariants invs)
         body
   termination_by SizeOf.sizeOf s
