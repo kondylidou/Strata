@@ -24,6 +24,9 @@ This document tracks the selected Boole feature-request seeds kept under
   - Fresh Core block labels prevent inner loops from shadowing the enclosing `"for"` label; loop elimination havocs only loop-carried variables.
   - Benchmark: [`square_matrix_multiply.lean`](../StrataTest/Languages/Boole/square_matrix_multiply.lean).
   - Note: covers `for i in 0..N` range loops only. Iterator-based `for x in iter.iter()` is a separate gap (#27).
+- **Bitvector loop variables** (`for i : bvN := init to limit`)
+  - `for_to_by` and `for_downto_by` dispatch guard/step/increment to `Bv{N}.ULe/Add/Sub` when the loop variable is a bitvector type instead of `int`.
+  - Benchmark: [`sha256_compact_indexed.lean`](../StrataTest/Languages/Boole/FeatureRequests/sha256_compact_indexed.lean) (`for i : bv64`).
 - **Early return** (#871)
   - `exit functionName;` exits the labeled Core block wrapping the procedure body, acting as an early return.
 - **Bitwise operators on `bvN` types** (#970)
@@ -66,13 +69,14 @@ This document tracks the selected Boole feature-request seeds kept under
 4. **`closed` visibility**: Lower priority. Keep closed spec-function bodies hidden across module boundaries.
 5. **Overflow guards**: Lower priority. Preserve `HasType`-style arithmetic overflow checks if Verus-specific guards are worth modeling directly.
 6. **Widening casts outside call sites**: Insert or preserve cast/coercion structure in comparisons, quantifiers, and other expressions with a centralized type-directed coercion pass.
+7. **`decreases` metadata**: Implemented.
 
 ## Type/model requests
 
 8. **Native `nat` support**: Stop modeling `nat` as a purely abstract type with uninterpreted coercions.
 9. **Missing model types**: Add or standardize support for model types such as `Cell`, `Atomic`, `Thread`, `Rwlock`, `Unit`, and `Arithmetic_overflow`.
 10. **On-demand stdlib/pervasive stubs**: Some pervasive stubs may be droppable after pruning translation output.
-11. **Sequence slicing**: Implemented — see implemented section above. Remaining gap: recursive spec functions over sequences (e.g. `bytes_seq_as_nat`) need int-based termination proofs.
+11. **Sequence slicing**: Implemented. Remaining gap: recursive spec functions over sequences (e.g. `bytes_seq_as_nat`) need int-based termination proofs.
 12. **Generic/category typing cleanup**: Reduce `nat`/`int`/bitvector width mismatches and generic type-shape mismatches in the type-checker.
 13. **Struct/record types with named field access**: `type T := { f1: A, f2: B }` declarations, `.field` accessor expressions, struct literal construction, and quantification over fixed-size field arrays (e.g. `∀ i < 5 . fe.limbs[i] < 2^51`). Used in every dalek spec function.
 14. **`Option<T>` in spec functions**: Native `Option<T>` return type so fallible spec functions can be represented faithfully; currently encoded as `is_some` flag plus component functions. Every Vest parser returns `Option<(int, T)>`.
@@ -86,8 +90,8 @@ This document tracks the selected Boole feature-request seeds kept under
 
 ## Expressiveness requests
 
-15. **Higher-order / lambda / closure support**: Implemented for spec expression positions — see implemented section above. Remaining gap: first-class function values as procedure parameters or local variables.
-16. **`choose`**: Implemented — see implemented section above.
+15. **Higher-order / lambda / closure support**: Implemented. Remaining gap: first-class function values as procedure parameters or local variables.
+16. **`choose`**: Implemented.
 17. **Mutual recursion / forward references**: Implemented for functions over datatypes (structural recursion via `@[cases]`). Remaining gap: mutual recursion over `int` or other non-datatype types requiring an explicit `decreases` clause.
 18. **Trait-spec symbol resolution**: Preserve trait-spec symbols across module boundaries.
 19. **Trait / interface with spec and proof methods**: `interface` declarations bundling `spec function` and `lemma` members, with `matches` pattern syntax in `ensures` and `external_body`-style trusted bodies. Confirmed as the backbone of Vest combinators.
