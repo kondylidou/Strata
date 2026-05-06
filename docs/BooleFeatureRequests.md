@@ -29,6 +29,7 @@ This document tracks the selected Boole feature-request seeds kept under
   - Benchmark: [`sha256_compact_indexed.lean`](../StrataTest/Languages/Boole/FeatureRequests/sha256_compact_indexed.lean) (`for i : bv64`).
 - **Early return** (#871)
   - `exit functionName;` exits the labeled Core block wrapping the procedure body, acting as an early return.
+  - Benchmark: [`early_return.lean`](../StrataTest/Languages/Boole/early_return.lean).
 - **Bitwise operators on `bvN` types** (#970)
   - `&`, `|`, `^`, `>>` (UShr), `>>s` (SShr), `<<`, `~` lower to `Bv{N}.And/Or/Xor/UShr/SShr/Shl/Not` Core ops.
   - `bvWidth` helper extracts the bit-width from the Boole type and dispatches to the right-sized op.
