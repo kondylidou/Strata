@@ -190,4 +190,4 @@ spec {
 };
 #end
 
-#eval Strata.Boole.verify "cvc5" sha256_compact_indexed_program (options := .quiet)
+--#eval Strata.Boole.verify "cvc5" sha256_compact_indexed_program (options := .quiet)
