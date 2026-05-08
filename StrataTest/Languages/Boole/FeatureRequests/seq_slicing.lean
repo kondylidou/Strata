@@ -56,6 +56,15 @@ spec {
   mid  := Sequence.subrange(s, 1, 3);
 };
 
+procedure seq_empty_bv64_seed() returns (s: Sequence bv64)
+spec {
+  ensures Sequence.length(s) == 1;
+  ensures Sequence.select(s, 0) == bv{64}(0);
+}
+{
+  s := Sequence.build(Sequence.empty_bv64, bv{64}(0));
+};
+
 // Recursive reconstruct — target shape, not yet verifiable:
 // requires int-based termination proofs (open gap).
 //
@@ -85,6 +94,14 @@ Property: assert
 Result: ✅ pass
 
 Obligation: seq_slicing_seed_ensures_6_1831
+Property: assert
+Result: ✅ pass
+
+Obligation: seq_empty_bv64_seed_ensures_7_2067
+Property: assert
+Result: ✅ pass
+
+Obligation: seq_empty_bv64_seed_ensures_8_2102
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in
