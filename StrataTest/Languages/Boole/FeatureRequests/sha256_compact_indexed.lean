@@ -1,9 +1,3 @@
-/-
-  Copyright Strata Contributors
-
-  SPDX-License-Identifier: Apache-2.0 OR MIT
--/
-
 import Strata.MetaVerifier
 
 open Strata
@@ -48,15 +42,13 @@ spec {
   var j : bv64;
   var res : (Sequence bv32);
   res := Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.empty_bv32, bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0));
-  for i : bv64 := bv{64}(0) to bv{64}(16) - bv{64}(1)
-  {
+  for i : bv64 := bv{64}(0) to bv{64}(16) - bv{64}(1){
     j := i * bv{64}(4);
     assert 0 <= 24 && 24 < 32;
     assert 0 <= 16 && 16 < 32;
     assert 0 <= 8 && 8 < 32;
     res := Sequence.update(res, bv64_to_int_u(i), bv8_to_bv32_u(Sequence.select(block, bv64_to_int_u(j))) << bv{32}(24) | (bv8_to_bv32_u(Sequence.select(block, bv64_to_int_u(j + bv{64}(1)))) << bv{32}(16)) | (bv8_to_bv32_u(Sequence.select(block, bv64_to_int_u(j + bv{64}(2)))) << bv{32}(8)) | bv8_to_bv32_u(Sequence.select(block, bv64_to_int_u(j + bv{64}(3)))));
   }
-
   _pct_return := res;
   exit to_u32s;
 };
@@ -93,7 +85,9 @@ spec {
   var f : bv32;
   var g : bv32;
   var h : bv32;
+  var block_local : (Sequence bv32);
   state_out := state;
+  block_local := block;
   a := Sequence.select(state_out, bv64_to_int_u(bv{64}(0)));
   b := Sequence.select(state_out, bv64_to_int_u(bv{64}(1)));
   c := Sequence.select(state_out, bv64_to_int_u(bv{64}(2)));
@@ -102,13 +96,12 @@ spec {
   f := Sequence.select(state_out, bv64_to_int_u(bv{64}(5)));
   g := Sequence.select(state_out, bv64_to_int_u(bv{64}(6)));
   h := Sequence.select(state_out, bv64_to_int_u(bv{64}(7)));
-  for i : bv64 := bv{64}(0) to bv{64}(64) - bv{64}(1)
-  {
+  for i : bv64 := bv{64}(0) to bv{64}(64) - bv{64}(1){
     if (i < bv{64}(16)) {
-      tmp36 := Sequence.select(block, bv64_to_int_u(i));
+      tmp36 := Sequence.select(block_local, bv64_to_int_u(i));
     } else {
       assert bv{64}(16) != bv{64}(0);
-      w15 := Sequence.select(block, bv64_to_int_u((i - bv{64}(15)) mod bv{64}(16)));
+      w15 := Sequence.select(block_local, bv64_to_int_u((i - bv{64}(15)) mod bv{64}(16)));
       call tmp15 := rotate_right(w15, bv{32}(7));
 
       call tmp16 := rotate_right(w15, bv{32}(18));
@@ -116,7 +109,7 @@ spec {
       assert 0 <= 3 && 3 < 32;
       s0 := tmp15 ^ tmp16 ^ (w15 >> bv{32}(3));
       assert bv{64}(16) != bv{64}(0);
-      w2 := Sequence.select(block, bv64_to_int_u((i - bv{64}(2)) mod bv{64}(16)));
+      w2 := Sequence.select(block_local, bv64_to_int_u((i - bv{64}(2)) mod bv{64}(16)));
       call tmp22 := rotate_right(w2, bv{32}(17));
 
       call tmp23 := rotate_right(w2, bv{32}(19));
@@ -125,9 +118,9 @@ spec {
       s1 := tmp22 ^ tmp23 ^ (w2 >> bv{32}(10));
       assert bv{64}(16) != bv{64}(0);
       assert bv{64}(16) != bv{64}(0);
-      new_w := Sequence.select(block, bv64_to_int_u((i - bv{64}(16)) mod bv{64}(16))) + s0 + Sequence.select(block, bv64_to_int_u((i - bv{64}(7)) mod bv{64}(16))) + s1;
+      new_w := Sequence.select(block_local, bv64_to_int_u((i - bv{64}(16)) mod bv{64}(16))) + s0 + Sequence.select(block_local, bv64_to_int_u((i - bv{64}(7)) mod bv{64}(16))) + s1;
       assert bv{64}(16) != bv{64}(0);
-      block := Sequence.update(block, bv64_to_int_u(i mod bv{64}(16)), new_w);
+      block_local := Sequence.update(block_local, bv64_to_int_u(i mod bv{64}(16)), new_w);
       tmp36 := new_w;
     }
     w := tmp36;
@@ -139,7 +132,7 @@ spec {
 
     s1 := tmp37 ^ tmp38 ^ tmp40;
     ch := e & f ^ (~e & g);
-    tmp44 := k32();
+    tmp44 := k32;
     t1 := s1 + ch + Sequence.select(tmp44, bv64_to_int_u(i)) + w + h;
     call tmp48 := rotate_right(a, bv{32}(2));
 
@@ -159,7 +152,6 @@ spec {
     b := a;
     a := t1 + t2;
   }
-
   state_out := Sequence.update(state_out, bv64_to_int_u(bv{64}(0)), Sequence.select(state_out, bv64_to_int_u(bv{64}(0))) + a);
   state_out := Sequence.update(state_out, bv64_to_int_u(bv{64}(1)), Sequence.select(state_out, bv64_to_int_u(bv{64}(1))) + b);
   state_out := Sequence.update(state_out, bv64_to_int_u(bv{64}(2)), Sequence.select(state_out, bv64_to_int_u(bv{64}(2))) + c);
@@ -197,5 +189,5 @@ spec {
   exit main;
 };
 #end
--- TODO pending fixing
---#eval Strata.Boole.verify "cvc5" sha256_compact_indexed_program (options := .quiet)
+
+#eval Strata.Boole.verify "cvc5" sha256_compact_indexed_program (options := .quiet)

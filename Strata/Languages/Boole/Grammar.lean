@@ -122,17 +122,17 @@ op step(e: Expr) : Step =>
 op for_statement (v : MonoBind, init : Expr,
   @[scope(v)] guard : bool, @[scope(v)] step : Expr,
   @[scope(v)] invs : Invariants, @[scope(v)] body : Block) : Statement =>
-  "for " "(" v " := " init "; " guard "; " step ")" invs body;
+  "for " "(" v " := " init "; " guard "; " step ")" invs body:0;
 
 op for_to_by_statement (v : MonoBind, init : Expr, limit : Expr,
   @[scope(v)] step : Option Step, @[scope(v)] decr : Option Measure,
   @[scope(v)] invs : Invariants, @[scope(v)] body : Block) : Statement =>
-  "for " v " := " init " to " limit step decr invs body;
+  "for " v " := " init " to " limit step decr invs body:0;
 
 op for_down_to_by_statement (v : MonoBind, init : Expr, limit : Expr,
   @[scope(v)] step : Option Step, @[scope(v)] decr : Option Measure,
   @[scope(v)] invs : Invariants, @[scope(v)] body : Block) : Statement =>
-  "for " v " := " init " downto " limit step decr invs body;
+  "for " v " := " init " downto " limit step decr invs body:0;
 
 category Program;
 op prog (commands : SpacePrefixSepBy Command) : Program =>

@@ -262,7 +262,8 @@ def toCoreTypedUn (m : SourceRange) (ty : Boole.Type) (op : String) (a : Core.Ex
 -- Signed variants use the explicit bvslt/bvsle nodes.
 private def toBvCmpOp (op : String) : String :=
   match op with
-  | "Le" => "ULe" | "Lt" => "ULt" | "Ge" => "UGe" | "Gt" => "UGt" | other => other
+  | "Le" => "ULe" | "Lt" => "ULt" | "Ge" => "UGe" | "Gt" => "UGt"
+  | "Div" => "UDiv" | "Mod" => "UMod" | other => other
 
 def toCoreTypedBin (m : SourceRange) (ty : Boole.Type) (op : String) (a b : Core.Expression.Expr) : TranslateM Core.Expression.Expr := do
   match ty with
@@ -392,6 +393,8 @@ def toCoreExpr (e : Boole.Expr) : TranslateM Core.Expression.Expr := do
   | .bvsle  m ty a b => toCoreBvBin m ty "SLe"  (← toCoreExpr a) (← toCoreExpr b)
   | .bvsgt  m ty a b => toCoreBvBin m ty "SGt"  (← toCoreExpr a) (← toCoreExpr b)
   | .bvsge  m ty a b => toCoreBvBin m ty "SGe"  (← toCoreExpr a) (← toCoreExpr b)
+  | .bvsdiv m ty a b => toCoreBvBin m ty "SDiv" (← toCoreExpr a) (← toCoreExpr b)
+  | .bvsmod m ty a b => toCoreBvBin m ty "SMod" (← toCoreExpr a) (← toCoreExpr b)
   | .old _ _ a =>
       return oldifyExpr (← get).currentInoutNames (← toCoreExpr a)
   -- Sequence operations (Core Grammar, inherited by Boole)
