@@ -456,6 +456,13 @@ def toCoreInvariants (is : BooleDDM.Invariants SourceRange) :
     return (lbl, e') :: (← toCoreInvariants rest)
 
 -- Return (leOp, addOp, subOp, one) appropriate for the loop variable type.
+-- TODO: add a front-end type-compat check in `lowerFor` that verifies the
+-- init/limit/step expressions all have the same bitvector width as `ty`.
+-- Without it, a mismatch (e.g. `bv32` loop variable with a `bv16` limit)
+-- emits ill-typed `Bv32.ULe`/`Bv32.Add` ops that fail the SMT encoder's
+-- type check with a low-level error far from the source location.
+-- Use `toCoreMonoType` + `LMonoTy` equality to check; throw at the `for`
+-- source range (`m`) so the diagnostic points at the user's code.
 private def forArithOps (ty : Lambda.LMonoTy) :
     Core.Expression.Expr × Core.Expression.Expr × Core.Expression.Expr × Core.Expression.Expr :=
   match ty with
