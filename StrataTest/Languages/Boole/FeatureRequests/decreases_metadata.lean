@@ -72,7 +72,7 @@ example : Strata.smtVCsCorrect decreasesMetadataSeed := by
   all_goals (try grind)
 
 -- Procedure-level `decreases` is parsed (via `Option Measure` on `boole_procedure`)
--- and emits a dbg_trace warning; termination is not verified.
+-- and silently dropped; termination is not verified.
 -- `clamp` is non-recursive; no `decreases` clause needed.
 private def decreasesFunctionSeed : Strata.Program :=
 #strata
@@ -94,10 +94,8 @@ spec {
 };
 #end
 
-/-- info: Boole: procedure-level `decreases` at { start := { byteIdx := 2059 }, stop := { byteIdx := 2070 } } is ignored by the current lowering (see FeatureRequests/decreases_metadata.lean)
----
-info:
-Obligation: decreases_proc_seed_ensures_1_2099
+/-- info:
+Obligation: decreases_proc_seed_ensures_1_2090
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in
@@ -154,7 +152,7 @@ Obligation: measure_decrease_0
 Property: assert
 Result: ✅ pass
 
-Obligation: for_decreases_seed_ensures_1_2835
+Obligation: for_decreases_seed_ensures_1_2635
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in

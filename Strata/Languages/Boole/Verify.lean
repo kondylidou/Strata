@@ -580,14 +580,24 @@ def toCoreStmt (s : BooleDDM.Statement SourceRange) : TranslateM Core.Statement 
       | .condDet _ expr => pure (.det (← toCoreExpr expr))
       | .condNondet _ => pure .nondet
     return .ite cond thenb elseb (← toCoreMetaData m)
-  | .choose_assign m ⟨_, lhs⟩ _v pred =>
+  | .choose_assign m ⟨_, lhs⟩ v pred =>
     let lhsExpr : Core.Expression.Expr := .fvar () (mkIdent lhs) none
     let predExpr ← withBVarExprs #[lhsExpr] (toCoreExpr pred)
     let md ← toCoreMetaData m
     let label ← defaultLabel m "choose" none
+    -- Existence obligation: assert ∃ z : T . pred(z) before havocing.
+    -- Without this, `havoc w; assume pred(w)` silently becomes
+    -- `assume false` when pred is unsatisfiable, making every subsequent
+    -- obligation verify as a false positive.
+    let .mono_bind_mk _ _ vTy := v
+    let vMonoTy ← toCoreMonoType vTy
+    let existsBody ← withBVarExprs #[.bvar () 0] (toCoreExpr pred)
+    let existsExpr : Core.Expression.Expr :=
+      .quant () .exist "" (some vMonoTy) (.bvar () 0) existsBody
+    let existenceAssert := Core.Statement.assert s!"{label}_exists" existsExpr md
     let havocStmt := Core.Statement.havoc (mkIdent lhs) md
     let assumeStmt := Core.Statement.assume label predExpr md
-    return .block label [havocStmt, assumeStmt] md
+    return .block label [existenceAssert, havocStmt, assumeStmt] md
   | .havoc_statement m ⟨_, n⟩ =>
     return Core.Statement.havoc (mkIdent n) (← toCoreMetaData m)
   | .while_statement m g _ invs b =>
@@ -906,10 +916,7 @@ private def translateProcedureDecl
 
 def toCoreDecls (cmd : BooleDDM.Command SourceRange) : TranslateM (List Core.Decl) := do
   match cmd with
-  | .boole_procedure m nameAnn targsAnn ins outsAnn decr specAnn bodyAnn =>
-    if let some (.measure_mk dm _) := decr.val then
-      dbg_trace s!"Boole: procedure-level `decreases` at {repr dm} is ignored by the current lowering \
-        (see FeatureRequests/decreases_metadata.lean)"
+  | .boole_procedure m nameAnn targsAnn ins outsAnn _ specAnn bodyAnn =>
     let n := nameAnn.val
     let tys := match targsAnn.val with | none => [] | some ts => typeArgsToList ts
     withTypeBVars tys do

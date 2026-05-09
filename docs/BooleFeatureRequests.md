@@ -43,12 +43,13 @@ This document tracks the selected Boole feature-request seeds kept under
   - Remaining gap: mutual recursion over `int` — see #17.
   - Benchmark: [`mutual_recursion.lean`](../StrataTest/Languages/Boole/FeatureRequests/mutual_recursion.lean) (`even`/`odd` over `MyNat`).
 - **`choose` syntax**
-  - `w := choose z : T :: pred(z)` desugars to `havoc w; assume pred[z/w]`.
+  - `w := choose z : T :: pred(z)` desugars to `assert ∃ z : T . pred(z); havoc w; assume pred[z/w]`.
+  - The existence assertion guards soundness: without it, an unsatisfiable `pred` silently becomes `assume false`, making every downstream obligation a false positive.
   - Benchmark: [`choose_operator.lean`](../StrataTest/Languages/Boole/choose_operator.lean).
 - **`decreases` annotation on functions, procedures, and `for` loops**
   - Parsing/forwarding implemented (#1075): accepted in function preconds, `spec {}` blocks, procedure headers, and `for v := init to/downto limit` loops; the `for`-loop measure is forwarded to the Core while-loop measure field and actively verified.
   - `decreases` on functions: termination verification implemented (#1092).
-  - `decreases` on procedures: `decr : Option Measure` parameter on `boole_procedure`, reusing Core's existing `Measure` category (consistent with `command_function`); currently emits a `dbg_trace` warning and is dropped — termination verification coming after int-based recursive function support.
+  - `decreases` on procedures: `decr : Option Measure` parameter on `boole_procedure`, reusing Core's existing `Measure` category (consistent with `command_function`); currently parsed and silently dropped — termination verification coming after int-based recursive function support.
   - Remaining gap: int-based termination for recursive spec functions (e.g. `fib`, `reconstruct` over NAF, `u8_64_as_group_canonical`, `field_element_from_bytes`) — defined recursively in the original Verus source; needs a follow-up PR after #1092.
   - Benchmark: [`decreases_metadata.lean`](../StrataTest/Languages/Boole/FeatureRequests/decreases_metadata.lean).
 - **`Sequence T` type and slicing ops**
@@ -131,7 +132,7 @@ These are the curated one-gap Boole seeds.
 | [`higher_order_encoding.lean`](../StrataTest/Languages/Boole/FeatureRequests/higher_order_encoding.lean) | Higher-order values via first-order `apply` encoding | Verus `fun_ext`, `trait_for_fn` | Active |
 | [`lambda_closure.lean`](../StrataTest/Languages/Boole/FeatureRequests/lambda_closure.lean) | Direct lambda / closure syntax | Local reduced Rust/Verus-style lambda example | Implemented (#1075); remaining gap: first-class function values as procedure parameters/variables |
 | [`mutual_recursion.lean`](../StrataTest/Languages/Boole/FeatureRequests/mutual_recursion.lean) | Mutual recursion / forward references | Verus `guide/recursion`; VLIR `mutual_recursion`, `recursion` | Implemented for datatypes (#599); mutual recursion over `int` still open |
-| [`decreases_metadata.lean`](../StrataTest/Languages/Boole/FeatureRequests/decreases_metadata.lean) | `decreases` preservation | Verus `proposal-rw2022`, `rw2022_script`, `recursion`; VLIR `LoopSimpleWithSpec` | For-loop `decreases` actively verified; function `decreases` verified by #1092; procedure `decreases` parsed via `Option Measure`, emits warning, dropped pending int-based termination |
+| [`decreases_metadata.lean`](../StrataTest/Languages/Boole/FeatureRequests/decreases_metadata.lean) | `decreases` preservation | Verus `proposal-rw2022`, `rw2022_script`, `recursion`; VLIR `LoopSimpleWithSpec` | For-loop `decreases` actively verified; function `decreases` verified by #1092; procedure `decreases` parsed via `Option Measure`, silently dropped pending int-based termination |
 | [`horner_poly_eval.lean`](../StrataTest/Languages/Boole/FeatureRequests/horner_poly_eval.lean) | Reusable math/power/summation support for richer functional specs | CLRS Horner’s rule, Exercise 2.3 | Type-checks; full math spec still open |
 | [`embedded_postcondition.lean`](../StrataTest/Languages/Boole/embedded_postcondition.lean) | Inline `let`-binding blocks in `ensures` clauses | dalek-lite `montgomery.rs` `mul_clamped`, `mul_bits_be` | Implemented (#1075) |
 | [`montgomery_loop_invariant.lean`](../StrataTest/Languages/Boole/FeatureRequests/montgomery_loop_invariant.lean) | Relational loop invariants over two co-evolving variables | dalek-lite `montgomery.rs` `mul_bits_be` (Montgomery ladder) | Linear arithmetic case: implemented (#1075); elliptic curve case: open — requires group-law axioms (Costello-Smith 2017, eq. 4); whether cvc5 closes the invariant with those axioms is untested |
