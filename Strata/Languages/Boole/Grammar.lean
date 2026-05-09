@@ -45,12 +45,11 @@ op boole_procedure (name : Ident,
                     typeArgs : Option TypeArgs,
                     @[scope(typeArgs)] b : Bindings,
                     @[scope(b)] ret : Option MonoDeclList,
-                    @[scope(ret)] decr : Option Measure,
                     @[scope(ret)] s: Option Spec,
                     @[scope(ret)] body : Option Block) :
   Command =>
   @[prec(10)] "procedure " name typeArgs b " returns " "(" ret ")\n"
-              decr s body ";\n";
+              s body ";\n";
 
 // choose assignment: `w := choose z : T :: pred(z);`
 // Lowers to: `havoc w; assume pred[z/w];`

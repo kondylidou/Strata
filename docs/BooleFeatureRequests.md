@@ -26,7 +26,7 @@ This document tracks the selected Boole feature-request seeds kept under
   - Note: covers `for i in 0..N` range loops only. Iterator-based `for x in iter.iter()` is a separate gap (#27).
 - **Bitvector loop variables** (`for i : bvN := init to limit`)
   - `for_to_by` and `for_downto_by` dispatch guard/step/increment to `Bv{N}.ULe/Add/Sub` when the loop variable is a bitvector type instead of `int`.
-  - Benchmark: [`sha256_compact_indexed.lean`](../StrataTest/Languages/Boole/FeatureRequests/sha256_compact_indexed.lean) (`for i : bv64`).
+  - Benchmark: [`sha256_compact_indexed.lean`](../StrataTest/Languages/Boole/FeatureRequests/sha256_compact_indexed.lean).
 - **Early return** (#871)
   - `exit functionName;` exits the labeled Core block wrapping the procedure body, acting as an early return.
   - Benchmark: [`early_return.lean`](../StrataTest/Languages/Boole/early_return.lean).
@@ -46,8 +46,10 @@ This document tracks the selected Boole feature-request seeds kept under
   - `w := choose z : T :: pred(z)` desugars to `havoc w; assume pred[z/w]`.
   - Benchmark: [`choose_operator.lean`](../StrataTest/Languages/Boole/choose_operator.lean).
 - **`decreases` annotation on functions, procedures, and `for` loops**
-  - Accepted in function preconds, `spec {}` blocks, procedure headers, and `for v := init to/downto limit` loops; forwarded to the Core while-loop measure field. Not separately verified in the SMT path.
-  - Remaining gap: int-based termination for recursive spec functions (e.g. `fib`, `reconstruct` over NAF, `u8_64_as_group_canonical`, `field_element_from_bytes`). These are defined recursively in the original Verus source and must remain so — we need to support them faithfully. #1092 is ADT-only (no built-in `Nat`); int/sequence termination needs a follow-up PR after #1092.
+  - Parsing/forwarding implemented (#1075): accepted in function preconds, `spec {}` blocks, procedure headers, and `for v := init to/downto limit` loops; the `for`-loop measure is forwarded to the Core while-loop measure field and actively verified.
+  - `decreases` on functions: termination verification implemented (#1092). `decreases_spec` is now a Core `SpecElt` (not Boole-specific).
+  - `decreases` on procedures: placed inside the `spec {}` block as `decreases_spec`; termination verification coming after int-valued recursive functions.
+  - Remaining gap: int-based termination for recursive spec functions (e.g. `fib`, `reconstruct` over NAF, `u8_64_as_group_canonical`, `field_element_from_bytes`) — defined recursively in the original Verus source; needs a follow-up PR after #1092.
   - Benchmark: [`decreases_metadata.lean`](../StrataTest/Languages/Boole/FeatureRequests/decreases_metadata.lean).
 - **`Sequence T` type and slicing ops**
   - All 8 Core inherited ops wired up; wrappers added for `Sequence.skip`, `Sequence.dropFirst`, `Sequence.subrange`.
@@ -70,7 +72,7 @@ This document tracks the selected Boole feature-request seeds kept under
 4. **`closed` visibility**: Lower priority. Keep closed spec-function bodies hidden across module boundaries.
 5. **Overflow guards**: Lower priority. Preserve `HasType`-style arithmetic overflow checks if Verus-specific guards are worth modeling directly.
 6. **Widening casts outside call sites**: Insert or preserve cast/coercion structure in comparisons, quantifiers, and other expressions with a centralized type-directed coercion pass.
-7. **`decreases` metadata**: Implemented.
+7. **`decreases` metadata**: Parsing implemented (#1075). Function termination verification implemented (#1092). Procedure `decreases` placed in `spec {}` block; verification after int-valued recursive functions.
 
 ## Type/model requests
 
@@ -129,7 +131,7 @@ These are the curated one-gap Boole seeds.
 | [`higher_order_encoding.lean`](../StrataTest/Languages/Boole/FeatureRequests/higher_order_encoding.lean) | Higher-order values via first-order `apply` encoding | Verus `fun_ext`, `trait_for_fn` | Active |
 | [`lambda_closure.lean`](../StrataTest/Languages/Boole/FeatureRequests/lambda_closure.lean) | Direct lambda / closure syntax | Local reduced Rust/Verus-style lambda example | Implemented (#1075); remaining gap: first-class function values as procedure parameters/variables |
 | [`mutual_recursion.lean`](../StrataTest/Languages/Boole/FeatureRequests/mutual_recursion.lean) | Mutual recursion / forward references | Verus `guide/recursion`; VLIR `mutual_recursion`, `recursion` | Implemented for datatypes (#599); mutual recursion over `int` still open |
-| [`decreases_metadata.lean`](../StrataTest/Languages/Boole/FeatureRequests/decreases_metadata.lean) | `decreases` preservation | Verus `proposal-rw2022`, `rw2022_script`, `recursion`; VLIR `LoopSimpleWithSpec` | Implemented (#1075); remaining gap: int-based termination for recursive functions |
+| [`decreases_metadata.lean`](../StrataTest/Languages/Boole/FeatureRequests/decreases_metadata.lean) | `decreases` preservation | Verus `proposal-rw2022`, `rw2022_script`, `recursion`; VLIR `LoopSimpleWithSpec` | For-loop and function `decreases` implemented (#1075, #1092); procedure `decreases` inside `spec {}` block; termination verification after int-valued recursive functions |
 | [`horner_poly_eval.lean`](../StrataTest/Languages/Boole/FeatureRequests/horner_poly_eval.lean) | Reusable math/power/summation support for richer functional specs | CLRS Horner’s rule, Exercise 2.3 | Type-checks; full math spec still open |
 | [`embedded_postcondition.lean`](../StrataTest/Languages/Boole/embedded_postcondition.lean) | Inline `let`-binding blocks in `ensures` clauses | dalek-lite `montgomery.rs` `mul_clamped`, `mul_bits_be` | Implemented (#1075) |
 | [`montgomery_loop_invariant.lean`](../StrataTest/Languages/Boole/FeatureRequests/montgomery_loop_invariant.lean) | Relational loop invariants over two co-evolving variables | dalek-lite `montgomery.rs` `mul_bits_be` (Montgomery ladder) | Linear arithmetic case: implemented (#1075); elliptic curve case: open — requires group-law axioms (Costello-Smith 2017, eq. 4); whether cvc5 closes the invariant with those axioms is untested |
@@ -140,4 +142,4 @@ These are the curated one-gap Boole seeds.
 | [`struct_field_access.lean`](../StrataTest/Languages/Boole/FeatureRequests/struct_field_access.lean) | Struct/record types with named field access | dalek-lite `field_specs.rs`, `edwards_specs.rs` | Active |
 | [`trait_spec_methods.lean`](../StrataTest/Languages/Boole/FeatureRequests/trait_spec_methods.lean) | Trait / interface with spec and proof methods; `matches` in `ensures` | VeruSAGE-Bench Vest `SecureSpecCombinator` | Active |
 | [`option_matches.lean`](../StrataTest/Languages/Boole/FeatureRequests/option_matches.lean) | `Option<T>` in spec functions; `matches` in `ensures`/`exists` | VeruSAGE-Bench Vest `SecureSpecCombinator`, `leb128` | Active |
-| [`sha256_compact_indexed.lean`](../StrataTest/Languages/Boole/FeatureRequests/sha256_compact_indexed.lean) | Iterator protocol lowering (#27), array syntax (#25), slice types (#26), `bv` rotate primitives (#28) | RustCrypto SHA-256 compact port (indexed `Sequence` encoding) | Active — open: `compress_u32` modifies check; `Sequence` initialization resolved (#1075: `Sequence.empty_bv32`) |
+| [`sha256_compact_indexed.lean`](../StrataTest/Languages/Boole/FeatureRequests/sha256_compact_indexed.lean) | Iterator protocol lowering (#27), array syntax (#25), slice types (#26), `bv` rotate primitives (#28) | RustCrypto SHA-256 compact port (indexed `Sequence` encoding) | Active — all 19 VCs pass (#1075); open gaps: iterator protocol (#27), array syntax (#25), slice types (#26) |

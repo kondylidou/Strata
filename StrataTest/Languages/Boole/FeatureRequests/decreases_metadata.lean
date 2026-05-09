@@ -59,7 +59,7 @@ Obligation: arbitrary_iter_maintain_invariant_0_1
 Property: assert
 Result: ✅ pass
 
-Obligation: loop_measure_seed_ensures_1_789
+Obligation: loop_measure_seed_ensures_1_1174
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in
@@ -83,8 +83,8 @@ function clamp(n: int) : int
 }
 
 procedure decreases_proc_seed(n: int) returns (r: int)
-decreases n
 spec {
+  decreases n;
   requires 0 <= n;
   ensures r == n;
 }
