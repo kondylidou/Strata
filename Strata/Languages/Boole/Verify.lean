@@ -762,7 +762,6 @@ private def toCoreSpecElts (_m : SourceRange) (pname : String) (elts : Array (Bo
   for e in elts.toList do
     match e with
     | .modifies_spec _ _ => pure ()
-    | .decreases_spec _ _ => pure ()
     | .requires_spec em ⟨_, l?⟩ ⟨_, free?⟩ cond =>
       let md ← toCoreMetaData em
       reqs := (← defaultLabel em s!"{pname}_requires" l?, { expr := ← toCoreExpr cond, attr := checkAttrOf free?, md := md }) :: reqs
@@ -830,7 +829,7 @@ private def registerCommandSymbols (cmd : BooleDDM.Command SourceRange) : List B
   | .command_recfndefs _ ⟨_, funcs⟩ => funcs.toList.map (fun _ => true)
   | .command_var _ _ => [false]
   -- Procedure names are referenced by call statements directly and are not Expr.fvar symbols.
-  | .boole_procedure _ _ _ _ _ _ _ | .command_procedure _ _ _ _ _ _ => []
+  | .boole_procedure _ _ _ _ _ _ _ _ | .command_procedure _ _ _ _ _ _ => []
   | .command_datatypes _ ⟨_, decls⟩ => decls.toList.map (fun _ => false)
   | .command_block _ _ => []
   | .command_axiom _ _ _ => []
@@ -900,7 +899,7 @@ private def translateProcedureDecl
 
 def toCoreDecls (cmd : BooleDDM.Command SourceRange) : TranslateM (List Core.Decl) := do
   match cmd with
-  | .boole_procedure m nameAnn targsAnn ins outsAnn specAnn bodyAnn =>
+  | .boole_procedure m nameAnn targsAnn ins outsAnn _decr specAnn bodyAnn =>
     let n := nameAnn.val
     let tys := match targsAnn.val with | none => [] | some ts => typeArgsToList ts
     withTypeBVars tys do
@@ -1002,7 +1001,7 @@ def toCoreProgram (p : Boole.Program) (gctx : GlobalContext := {}) (fileName : S
           match (toCoreMonoType ty).run' { gctx := gctx, fvarIsOp := fvarIsOp } with
           | .ok mty => varTypes := varTypes.insert n mty
           | .error _ => pure ()
-      | .boole_procedure _ nameAnn _ _ _ specAnn _ =>
+      | .boole_procedure _ nameAnn _ _ _ _ specAnn _ =>
         let mods ← collectModifiesFromSpec fileName nameAnn.val specAnn.val varTypes
         if !mods.isEmpty then modMap := modMap.insert nameAnn.val mods
       | .command_procedure _ nameAnn _ _ specAnn _ =>

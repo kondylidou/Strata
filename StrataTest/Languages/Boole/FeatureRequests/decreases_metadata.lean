@@ -83,8 +83,8 @@ function clamp(n: int) : int
 }
 
 procedure decreases_proc_seed(n: int) returns (r: int)
+decreases n
 spec {
-  decreases n;
   requires 0 <= n;
   ensures r == n;
 }
