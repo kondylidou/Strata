@@ -203,4 +203,81 @@ spec {
 };
 #end
 
+/-- info:
+Obligation: assert_1_4048
+Property: assert
+Result: ✅ pass
+
+Obligation: assert_2_4091
+Property: assert
+Result: ✅ pass
+
+Obligation: assert_3_4881
+Property: assert
+Result: ✅ pass
+
+Obligation: assert_4_4912
+Property: assert
+Result: ✅ pass
+
+Obligation: assert_5_4943
+Property: assert
+Result: ✅ pass
+
+Obligation: callElimAssert_rotate_right_requires_0_3997_39
+Property: assert
+Result: ✅ pass
+
+Obligation: callElimAssert_rotate_right_requires_0_3997_35
+Property: assert
+Result: ✅ pass
+
+Obligation: assert_7_6617
+Property: assert
+Result: ✅ pass
+
+Obligation: callElimAssert_rotate_right_requires_0_3997_31
+Property: assert
+Result: ✅ pass
+
+Obligation: callElimAssert_rotate_right_requires_0_3997_27
+Property: assert
+Result: ✅ pass
+
+Obligation: assert_8_6856
+Property: assert
+Result: ✅ pass
+
+Obligation: callElimAssert_rotate_right_requires_0_3997_23
+Property: assert
+Result: ✅ pass
+
+Obligation: callElimAssert_rotate_right_requires_0_3997_19
+Property: assert
+Result: ✅ pass
+
+Obligation: callElimAssert_rotate_right_requires_0_3997_15
+Property: assert
+Result: ✅ pass
+
+Obligation: callElimAssert_rotate_right_requires_0_3997_11
+Property: assert
+Result: ✅ pass
+
+Obligation: callElimAssert_rotate_right_requires_0_3997_7
+Property: assert
+Result: ✅ pass
+
+Obligation: callElimAssert_rotate_right_requires_0_3997_3
+Property: assert
+Result: ✅ pass
+
+Obligation: entry_invariant_0_0
+Property: assert
+Result: ✅ pass
+
+Obligation: arbitrary_iter_maintain_invariant_0_0
+Property: assert
+Result: ✅ pass-/
+#guard_msgs in
 #eval Strata.Boole.verify "cvc5" sha256_compact_indexed_program (options := .quiet)
