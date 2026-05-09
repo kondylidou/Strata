@@ -899,7 +899,10 @@ private def translateProcedureDecl
 
 def toCoreDecls (cmd : BooleDDM.Command SourceRange) : TranslateM (List Core.Decl) := do
   match cmd with
-  | .boole_procedure m nameAnn targsAnn ins outsAnn _decr specAnn bodyAnn =>
+  | .boole_procedure m nameAnn targsAnn ins outsAnn decr specAnn bodyAnn =>
+    if let some (.measure_mk dm _) := decr.val then
+      dbg_trace s!"Boole: procedure-level `decreases` at {repr dm} is ignored by the current lowering \
+        (see FeatureRequests/decreases_metadata.lean)"
     let n := nameAnn.val
     let tys := match targsAnn.val with | none => [] | some ts => typeArgsToList ts
     withTypeBVars tys do

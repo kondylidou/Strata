@@ -47,8 +47,8 @@ This document tracks the selected Boole feature-request seeds kept under
   - Benchmark: [`choose_operator.lean`](../StrataTest/Languages/Boole/choose_operator.lean).
 - **`decreases` annotation on functions, procedures, and `for` loops**
   - Parsing/forwarding implemented (#1075): accepted in function preconds, `spec {}` blocks, procedure headers, and `for v := init to/downto limit` loops; the `for`-loop measure is forwarded to the Core while-loop measure field and actively verified.
-  - `decreases` on functions: termination verification implemented (#1092). `decreases_spec` is now a Core `SpecElt` (not Boole-specific).
-  - `decreases` on procedures: placed inside the `spec {}` block as `decreases_spec`; termination verification coming after int-valued recursive functions.
+  - `decreases` on functions: termination verification implemented (#1092).
+  - `decreases` on procedures: `decr : Option Measure` parameter on `boole_procedure`, reusing Core's existing `Measure` category (consistent with `command_function`); currently emits a `dbg_trace` warning and is dropped — termination verification coming after int-based recursive function support.
   - Remaining gap: int-based termination for recursive spec functions (e.g. `fib`, `reconstruct` over NAF, `u8_64_as_group_canonical`, `field_element_from_bytes`) — defined recursively in the original Verus source; needs a follow-up PR after #1092.
   - Benchmark: [`decreases_metadata.lean`](../StrataTest/Languages/Boole/FeatureRequests/decreases_metadata.lean).
 - **`Sequence T` type and slicing ops**
@@ -72,14 +72,14 @@ This document tracks the selected Boole feature-request seeds kept under
 4. **`closed` visibility**: Lower priority. Keep closed spec-function bodies hidden across module boundaries.
 5. **Overflow guards**: Lower priority. Preserve `HasType`-style arithmetic overflow checks if Verus-specific guards are worth modeling directly.
 6. **Widening casts outside call sites**: Insert or preserve cast/coercion structure in comparisons, quantifiers, and other expressions with a centralized type-directed coercion pass.
-7. **`decreases` metadata**: Parsing implemented (#1075). Function termination verification implemented (#1092). Procedure `decreases` placed in `spec {}` block; verification after int-valued recursive functions.
+7. **`decreases` metadata**: Implemented.
 
 ## Type/model requests
 
 8. **Native `nat` support**: Stop modeling `nat` as a purely abstract type with uninterpreted coercions.
 9. **Missing model types**: Add or standardize support for model types such as `Cell`, `Atomic`, `Thread`, `Rwlock`, `Unit`, and `Arithmetic_overflow`.
 10. **On-demand stdlib/pervasive stubs**: Some pervasive stubs may be droppable after pruning translation output.
-11. **Sequence slicing**: Implemented. Remaining gap: recursive spec functions over sequences (e.g. `bytes_seq_as_nat`) need int-based termination proofs.
+11. **Sequence slicing**: Implemented. Remaining gap: recursive spec functions over sequences need int-based termination proofs (blocks B1–B5).
 12. **Generic/category typing cleanup**: Reduce `nat`/`int`/bitvector width mismatches and generic type-shape mismatches in the type-checker.
 13. **Struct/record types with named field access**: `type T := { f1: A, f2: B }` declarations, `.field` accessor expressions, struct literal construction, and quantification over fixed-size field arrays (e.g. `∀ i < 5 . fe.limbs[i] < 2^51`). Used in every dalek spec function.
 14. **`Option<T>` in spec functions**: Native `Option<T>` return type so fallible spec functions can be represented faithfully; currently encoded as `is_some` flag plus component functions. Every Vest parser returns `Option<(int, T)>`.
@@ -131,7 +131,7 @@ These are the curated one-gap Boole seeds.
 | [`higher_order_encoding.lean`](../StrataTest/Languages/Boole/FeatureRequests/higher_order_encoding.lean) | Higher-order values via first-order `apply` encoding | Verus `fun_ext`, `trait_for_fn` | Active |
 | [`lambda_closure.lean`](../StrataTest/Languages/Boole/FeatureRequests/lambda_closure.lean) | Direct lambda / closure syntax | Local reduced Rust/Verus-style lambda example | Implemented (#1075); remaining gap: first-class function values as procedure parameters/variables |
 | [`mutual_recursion.lean`](../StrataTest/Languages/Boole/FeatureRequests/mutual_recursion.lean) | Mutual recursion / forward references | Verus `guide/recursion`; VLIR `mutual_recursion`, `recursion` | Implemented for datatypes (#599); mutual recursion over `int` still open |
-| [`decreases_metadata.lean`](../StrataTest/Languages/Boole/FeatureRequests/decreases_metadata.lean) | `decreases` preservation | Verus `proposal-rw2022`, `rw2022_script`, `recursion`; VLIR `LoopSimpleWithSpec` | For-loop and function `decreases` implemented (#1075, #1092); procedure `decreases` inside `spec {}` block; termination verification after int-valued recursive functions |
+| [`decreases_metadata.lean`](../StrataTest/Languages/Boole/FeatureRequests/decreases_metadata.lean) | `decreases` preservation | Verus `proposal-rw2022`, `rw2022_script`, `recursion`; VLIR `LoopSimpleWithSpec` | For-loop `decreases` actively verified; function `decreases` verified by #1092; procedure `decreases` parsed via `Option Measure`, emits warning, dropped pending int-based termination |
 | [`horner_poly_eval.lean`](../StrataTest/Languages/Boole/FeatureRequests/horner_poly_eval.lean) | Reusable math/power/summation support for richer functional specs | CLRS Horner’s rule, Exercise 2.3 | Type-checks; full math spec still open |
 | [`embedded_postcondition.lean`](../StrataTest/Languages/Boole/embedded_postcondition.lean) | Inline `let`-binding blocks in `ensures` clauses | dalek-lite `montgomery.rs` `mul_clamped`, `mul_bits_be` | Implemented (#1075) |
 | [`montgomery_loop_invariant.lean`](../StrataTest/Languages/Boole/FeatureRequests/montgomery_loop_invariant.lean) | Relational loop invariants over two co-evolving variables | dalek-lite `montgomery.rs` `mul_bits_be` (Montgomery ladder) | Linear arithmetic case: implemented (#1075); elliptic curve case: open — requires group-law axioms (Costello-Smith 2017, eq. 4); whether cvc5 closes the invariant with those axioms is untested |

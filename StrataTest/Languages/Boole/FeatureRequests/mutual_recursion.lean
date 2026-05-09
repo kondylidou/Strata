@@ -70,6 +70,14 @@ Obligation: odd_body_calls_MyNat..pred_0
 Property: assert
 Result: ✅ pass
 
+Obligation: even_terminates_0
+Property: assert
+Result: ✅ pass
+
+Obligation: odd_terminates_0
+Property: assert
+Result: ✅ pass
+
 Obligation: assert_4_1499
 Property: assert
 Result: ✅ pass
