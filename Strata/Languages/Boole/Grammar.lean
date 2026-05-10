@@ -97,19 +97,23 @@ fn let_in_expr (v : MonoBind, value : Expr, @[scope(v)] body : bool) : bool =>
 // between two identifiers.  This avoids the `qualifiedIdentExplicit` ambiguity
 // that would break `s ".skip(" n ")"` method-call style (the DDM's init
 // dialect parses `id.id` as a qualified ident before Expr-level trailing
--- Typed empty-sequence constants. `Sequence.empty` is 0-ary polymorphic which
--- the DDM parser cannot resolve without arguments, so each element type uses
--- a distinct token `Sequence.empty_<type>`.
---
--- To add a new element type: extend this list AND update the
--- `.seq_empty_*` match in `Verify.lean`'s `toCoreExpr`.
--- TODO: remove these in favour of a single `Sequence.empty : Sequence T`
--- when DDM supports 0-ary polymorphic resolution (tracking: <issue-number>).
+// rules can apply).
+//
+// Typed empty-sequence constants. `Sequence.empty` is 0-ary polymorphic which
+// the DDM parser cannot resolve without arguments, so each element type uses
+// a distinct token `Sequence.empty_<type>`.
+//
+// To add a new element type: extend this list AND update the
+// `.seq_empty_*` match in `Verify.lean`'s `toCoreExpr`.
+// TODO: remove these in favour of a single `Sequence.empty : Sequence T`
+// when DDM supports 0-ary polymorphic resolution (tracking: <issue-number>).
 fn seq_empty_bv8  () : Sequence bv8  => "Sequence.empty_bv8";
 fn seq_empty_bv16 () : Sequence bv16 => "Sequence.empty_bv16";
 fn seq_empty_bv32 () : Sequence bv32 => "Sequence.empty_bv32";
 fn seq_empty_bv64 () : Sequence bv64 => "Sequence.empty_bv64";
 fn seq_empty_int  () : Sequence int  => "Sequence.empty_int";
+fn seq_skip (A : Type, s : Sequence A, n : int) : Sequence A =>
+  "Sequence.skip" "(" s ", " n ")";
 fn seq_drop_first (A : Type, s : Sequence A) : Sequence A =>
   "Sequence.dropFirst" "(" s ")";
 fn seq_subrange (A : Type, s : Sequence A, lo : int, hi : int) : Sequence A =>
