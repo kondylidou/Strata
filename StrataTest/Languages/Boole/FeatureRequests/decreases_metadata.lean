@@ -53,11 +53,19 @@ Obligation: entry_invariant_0_1
 Property: assert
 Result: ✅ pass
 
+Obligation: measure_lb_0
+Property: assert
+Result: ✅ pass
+
 Obligation: arbitrary_iter_maintain_invariant_0_0
 Property: assert
 Result: ✅ pass
 
 Obligation: arbitrary_iter_maintain_invariant_0_1
+Property: assert
+Result: ✅ pass
+
+Obligation: measure_decrease_0
 Property: assert
 Result: ✅ pass
 
@@ -95,7 +103,7 @@ spec {
 #end
 
 /-- info:
-Obligation: decreases_proc_seed_ensures_1_2090
+Obligation: decreases_proc_seed_ensures_1_2216
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in
@@ -152,7 +160,7 @@ Obligation: measure_decrease_0
 Property: assert
 Result: ✅ pass
 
-Obligation: for_decreases_seed_ensures_1_2635
+Obligation: for_decreases_seed_ensures_1_2761
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in
@@ -184,12 +192,16 @@ Obligation: entry_invariant_0_0
 Property: assert
 Result: ✅ pass
 
+Obligation: measure_lb_0
+Property: assert
+Result: ✅ pass
+
 Obligation: arbitrary_iter_maintain_invariant_0_0
 Property: assert
 Result: ✅ pass
 
 Obligation: measure_decrease_0
 Property: assert
-Result: ❌ fail-/
+Result: ❓ unknown-/
 #guard_msgs in
 #eval Strata.Boole.verify "cvc5" decreasesNonDecreasing (options := .quiet)

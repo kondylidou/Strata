@@ -110,3 +110,26 @@ Result: ✅ pass-/
 example : Strata.smtVCsCorrect seqSlicingSeed := by
   gen_smt_vcs
   all_goals (try grind)
+
+-- Shape test: Sequence.select on an empty sequence currently produces no
+-- out-of-bounds precondition VC (that guard is tracked separately).
+-- The ensures clause passes because the result is unconstrained.
+private def seqOutOfBoundsSeed : Strata.Program :=
+#strata
+program Boole;
+
+procedure seq_oob_seed() returns (v: int)
+spec {
+  ensures v == 0;
+}
+{
+  v := Sequence.select(Sequence.empty_int, 0);
+};
+#end
+
+/-- info:
+Obligation: seq_oob_seed_ensures_0_3628
+Property: assert
+Result: ❓ unknown-/
+#guard_msgs in
+#eval Strata.Boole.verify "cvc5" seqOutOfBoundsSeed (options := .quiet)
