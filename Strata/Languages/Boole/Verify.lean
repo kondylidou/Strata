@@ -350,6 +350,9 @@ def toCoreExpr (e : Boole.Expr) : TranslateM Core.Expression.Expr := do
       return .fvar () id none
   | .bvar m i => getBVarExpr m i
   | .let_in_expr _ _bind value body =>
+    -- Assumption: `value` contains no free variables that share names with
+    -- binders in `body`.  Capture is not guarded against; all current seeds
+    -- are pure arithmetic with no name collisions.
     let value' ← toCoreExpr value
     withBVarExprs #[value'] (toCoreExpr body)
   | .app _ f a => return .app () (← toCoreExpr f) (← toCoreExpr a)
@@ -600,11 +603,14 @@ def toCoreStmt (s : BooleDDM.Statement SourceRange) : TranslateM Core.Statement 
     return .block label [existenceAssert, havocStmt, assumeStmt] md
   | .havoc_statement m ⟨_, n⟩ =>
     return Core.Statement.havoc (mkIdent n) (← toCoreMetaData m)
-  | .while_statement m g _ invs b =>
+  | .while_statement m g ⟨_, decr?⟩ invs b =>
     let guard ← match g with
       | .condDet _ expr => pure (.det (← toCoreExpr expr))
       | .condNondet _ => pure .nondet
-    return .loop guard none (← toCoreInvariants invs) (← withBVars [] (toCoreBlock b)) (← toCoreMetaData m)
+    let measureExpr ← (match decr? with
+      | none => pure none
+      | some (.measure_mk _ e) => return some (← toCoreExpr e))
+    return .loop guard measureExpr (← toCoreInvariants invs) (← withBVars [] (toCoreBlock b)) (← toCoreMetaData m)
   | .boole_call_statement m ⟨_, lhs⟩ ⟨_, n⟩ ⟨_, args⟩ => do
     let globalsPrefix ← constructProcArgsPrefix n
     let userIn := (← args.toList.mapM toCoreExpr).map Core.CallArg.inArg
@@ -696,14 +702,9 @@ def toCoreStmt (s : BooleDDM.Statement SourceRange) : TranslateM Core.Statement 
         | none => pure none
         | some (.measure_mk _ e) => return some (← toCoreExpr e))
       let body ← withBVars [] (toCoreBlock body)
-      lowerFor
-        m id ty
-        initExpr
-        guard
+      lowerFor m id ty initExpr guard
         (mkCoreApp addOp [.fvar () id none, stepExpr])
-        measureExpr
-        (← toCoreInvariants invs)
-        body
+        measureExpr (← toCoreInvariants invs) body
   | .for_down_to_by_statement m v init limit ⟨_, step?⟩ ⟨_, decr?⟩ invs body =>
     let (id, ty) ← toCoreMonoBind v
     let (leOp, _, subOp, one) := forArithOps ty
@@ -718,14 +719,9 @@ def toCoreStmt (s : BooleDDM.Statement SourceRange) : TranslateM Core.Statement 
         | none => pure none
         | some (.measure_mk _ e) => return some (← toCoreExpr e))
       let body ← withBVars [] (toCoreBlock body)
-      lowerFor
-        m id ty
-        initExpr
-        guard
+      lowerFor m id ty initExpr guard
         (mkCoreApp subOp [.fvar () id none, stepExpr])
-        measureExpr
-        (← toCoreInvariants invs)
-        body
+        measureExpr (← toCoreInvariants invs) body
   termination_by SizeOf.sizeOf s
 
 end

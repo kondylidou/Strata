@@ -157,3 +157,39 @@ Property: assert
 Result: ✅ pass-/
 #guard_msgs in
 #eval Strata.Boole.verify "cvc5" decreasesForLoopSeed (options := .quiet)
+
+-- Regression: a loop whose `decreases` measure does not actually decrease
+-- must fail the `measure_decrease` VC.
+private def decreasesNonDecreasing : Strata.Program :=
+#strata
+program Boole;
+
+procedure non_decreasing_seed(n: int) returns (i: int)
+spec {
+  requires 0 <= n;
+}
+{
+  i := n;
+  while (0 < i)
+    decreases 0
+    invariant 0 <= i
+  {
+    i := i - 1;
+  }
+};
+#end
+
+/-- info:
+Obligation: entry_invariant_0_0
+Property: assert
+Result: ✅ pass
+
+Obligation: arbitrary_iter_maintain_invariant_0_0
+Property: assert
+Result: ✅ pass
+
+Obligation: measure_decrease_0
+Property: assert
+Result: ❌ fail-/
+#guard_msgs in
+#eval Strata.Boole.verify "cvc5" decreasesNonDecreasing (options := .quiet)

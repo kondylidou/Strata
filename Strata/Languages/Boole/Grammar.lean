@@ -52,12 +52,19 @@ op boole_procedure (name : Ident,
   @[prec(10)] "procedure " name typeArgs b " returns " "(" ret ")\n"
               decr s body ";\n";
 
+// ── DDM id.id parsing ambiguity ──────────────────────────────────────────────
+// The DDM init dialect parses `id.id` as a `qualifiedIdentExplicit` before
+// Expr-level trailing rules apply.  A bare dot therefore means "field access
+// on the left-hand identifier", not "separator between two sub-expressions".
+// Two recurring patterns work around this:
+//   • Use `" :: "` as the separator in binders (choose, forall/exists).
+//   • Quote the full qualified name as a single string token (Sequence.xxx,
+//     datatype testers) so the DDM never sees a bare dot between identifiers.
+// ─────────────────────────────────────────────────────────────────────────────
+
 // choose assignment: `w := choose z : T :: pred(z);`
-// Lowers to: `havoc w; assume pred[z/w];`
-// `" :: "` is used (not `" . "`) for the same reason as `Sequence.skip` etc.:
-// the DDM init dialect parses `id.id` as a qualifiedIdentExplicit before
-// Expr-level trailing rules apply, so a bare dot between bound variable and
-// predicate would parse as a field access on the variable name.
+// Lowers to: `assert ∃ z : T . pred(z); havoc w; assume pred[z/w];`
+// Uses `" :: "` (not `" . "`) to avoid the id.id ambiguity above.
 op choose_assign (lhs : Ident, v : MonoBind, @[scope(v)] pred : bool) : Statement =>
   lhs " := choose " v " :: " pred ";";
 
