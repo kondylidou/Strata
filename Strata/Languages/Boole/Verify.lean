@@ -29,7 +29,6 @@ Boole verification pipeline:
 structure TranslateState where
   fileName : String := ""
   gctx : GlobalContext := {}
-  fvarIsOp : Array Bool := #[]
   tyBVars : Array String := #[]
   bvars : Array Core.Expression.Expr := #[]
   labelCounter : Nat := 0
@@ -111,14 +110,10 @@ private def getFVarName (m : SourceRange) (i : Nat) : TranslateM String := do
   | none => throwAt m s!"Unknown free variable with index {i}"
 
 private def getFVarIsOp (m : SourceRange) (i : Nat) : TranslateM Bool := do
-  let st ← get
-  match st.fvarIsOp[i]? with
-  | some b => return b
-  | none =>
-    match st.gctx.vars[i]? with
-    | some (_, .expr _) => return true
-    | some (_, .type _ _) => return false
-    | none => throwAt m s!"Unknown free variable with index {i}"
+  match (← get).gctx.vars[i]? with
+  | some (_, .expr _) => return true
+  | some (_, .type _ _) => return false
+  | none => throwAt m s!"Unknown free variable with index {i}"
 
 private def getBVarExpr (m : SourceRange) (i : Nat) : TranslateM Core.Expression.Expr := do
   let xs := (← get).bvars
@@ -692,35 +687,6 @@ private def lowerPureFuncDef
       preconditions := pres
     }
 
-/--
-Classify command-introduced free symbols:
-- constant/function declarations are treated as function symbols,
-- variable/type/datatype declarations are treated as term/type symbols.
--/
-private def registerCommandSymbols (cmd : BooleDDM.Command SourceRange) : List Bool :=
-  match cmd with
-  | .command_typedecl _ _ _ => [false]
-  | .command_typesynonym _ _ _ _ _ => [false]
-  | .command_constdecl _ _ _ _ => [true]
-  | .command_fndecl _ _ _ _ _ => [true]
-  | .command_fndef _ _ _ _ _ _ _ _ => [true]
-  | .command_recfndefs _ ⟨_, funcs⟩ => funcs.toList.map (fun _ => true)
-  | .command_var _ _ => [false]
-  -- Procedure names are referenced by call statements directly and are not Expr.fvar symbols.
-  | .boole_procedure _ _ _ _ _ _ _ | .command_procedure _ _ _ _ _ _ => []
-  | .command_datatypes _ ⟨_, decls⟩ => decls.toList.map (fun _ => false)
-  | .command_block _ _ => []
-  | .command_axiom _ _ _ => []
-  | .command_distinct _ _ _ => []
-
-/--
-Build the symbol-class table used by `getFVarIsOp`.
--/
-private def initFVarIsOp (p : Boole.Program) : Array Bool :=
-  match p with
-  | .prog _ ⟨_, cmds⟩ =>
-    (cmds.map registerCommandSymbols).toList.flatten.toArray
-
 private def collectModifiesFromSpec
     (fileName : String)
     (pname : String)
@@ -860,7 +826,6 @@ def formatProgram (prog : Boole.Program) (gctx : GlobalContext) (dialects : Dial
 def toCoreProgram (p : Boole.Program) (gctx : GlobalContext := {}) (fileName : String := "") : Except DiagnosticModel Core.Program := do
   match p with
   | .prog _ ⟨_, cmds⟩ =>
-    let fvarIsOp := initFVarIsOp p
     -- Pre-pass: collect global variable types and modifies info per procedure.
     let mut varTypes : Std.HashMap String Lambda.LMonoTy := {}
     let mut modMap : Std.HashMap String (List (Core.Expression.Ident × Lambda.LMonoTy)) := {}
@@ -869,7 +834,7 @@ def toCoreProgram (p : Boole.Program) (gctx : GlobalContext := {}) (fileName : S
       | .command_var _ b =>
         match b with
         | .bind_mk _ ⟨_, n⟩ _ ty =>
-          match (toCoreMonoType ty).run' { gctx := gctx, fvarIsOp := fvarIsOp } with
+          match (toCoreMonoType ty).run' { gctx := gctx } with
           | .ok mty => varTypes := varTypes.insert n mty
           | .error _ => pure ()
       | .boole_procedure _ nameAnn _ _ _ specAnn _ =>
@@ -882,7 +847,6 @@ def toCoreProgram (p : Boole.Program) (gctx : GlobalContext := {}) (fileName : S
     let init : TranslateState := {
       fileName := fileName
       gctx := gctx
-      fvarIsOp := fvarIsOp
       modifiesMap := modMap
       globalVarTypes := varTypes
     }
