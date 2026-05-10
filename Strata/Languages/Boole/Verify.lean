@@ -110,8 +110,11 @@ private def getFVarName (m : SourceRange) (i : Nat) : TranslateM String := do
   | none => throwAt m s!"Unknown free variable with index {i}"
 
 private def getFVarIsOp (m : SourceRange) (i : Nat) : TranslateM Bool := do
-  match (← get).gctx.vars[i]? with
-  | some (_, .expr _) => return true
+  let st ← get
+  match st.gctx.vars[i]? with
+  -- Global variables (command_var) become procedure parameters, not function
+  -- symbols; emit them as .fvar even though gctx stores them as .expr.
+  | some (name, .expr _) => return !st.globalVarTypes.contains name
   | some (_, .type _ _) => return false
   | none => throwAt m s!"Unknown free variable with index {i}"
 
