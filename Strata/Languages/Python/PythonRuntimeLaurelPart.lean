@@ -353,7 +353,7 @@ function List_get_non_neg (l : ListAny, i : int) : Any
 {
   if ListAny..isListAny_nil(l) then from_None()
   else if  i == 0 then ListAny..head!(l)
-  else List_get(ListAny..tail!(l), i - 1)
+  else List_get_non_neg(ListAny..tail!(l), i - 1)
 };
 
 function List_get (l : ListAny, i : int) : Any
@@ -420,7 +420,7 @@ function List_set_non_neg (l : ListAny, i : int, v: Any) : ListAny
 {
   if ListAny..isListAny_nil(l) then ListAny_nil()
   else if  i == 0 then ListAny_cons(v, ListAny..tail!(l))
-  else ListAny_cons(ListAny..head!(l), List_set(ListAny..tail!(l), i - 1, v))
+  else ListAny_cons(ListAny..head!(l), List_set_non_neg(ListAny..tail!(l), i - 1, v))
 };
 
 function List_set (l : ListAny, i : int, v: Any) : ListAny
@@ -1095,17 +1095,12 @@ Parse the Laurel DDM prelude into a Laurel Program.
 
 -- Prelude functions that may return an exception value as Any.
 -- We should make sure that all functions in this list propagate the exceptions from their arguments.
-def AnyMaybeExceptionList := ["Any_get!", "Any_set!", "Any_sets!", "PNeg", "PBitNot", "PNot", "PAdd", "PSub", "PMul",
+public def AnyMaybeExceptionList := ["Any_get!", "Any_set!", "Any_sets!", "PNeg", "PBitNot", "PNot", "PAdd", "PSub", "PMul",
    "PFloorDiv", "PLt", "PLe", "PGt", "PGe", "PPow", "PMod", "PLShift", "PRShift", "PAnd", "POr"]
 
 public def pythonRuntimeLaurelPart : Laurel.Program :=
   match Laurel.TransM.run (some $ .file "") (Laurel.parseProgram pythonRuntimeLaurelPartDDM) with
-  | .ok p =>
-    let addExceptionMd := p.staticProcedures.map (λ f =>
-      if f.name.text ∈ AnyMaybeExceptionList then
-        {f with name := {f.name with md := f.name.md.pushElem (.label "maybeException") (.switch true) }}
-      else f)
-    {p with staticProcedures := addExceptionMd}
+  | .ok p => p
   | .error e => dbg_trace s!"SOUND BUG: Failed to parse Python runtime Laurel part: {e}"; default
 
 end Python
