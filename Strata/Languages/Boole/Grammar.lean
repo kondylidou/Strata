@@ -113,7 +113,7 @@ fn let_in_expr (v : MonoBind, value : Expr, @[scope(v)] body : bool) : bool =>
 // To add a new element type: extend this list AND update the
 // `.seq_empty_*` match in `Verify.lean`'s `toCoreExpr`.
 // TODO: remove these in favour of a single `Sequence.empty : Sequence T`
-// when DDM supports 0-ary polymorphic resolution (tracking: <issue-number>).
+// when DDM supports 0-ary polymorphic resolution (tracking: #1157).
 fn seq_empty_bv8  () : Sequence bv8  => "Sequence.empty_bv8";
 fn seq_empty_bv16 () : Sequence bv16 => "Sequence.empty_bv16";
 fn seq_empty_bv32 () : Sequence bv32 => "Sequence.empty_bv32";
