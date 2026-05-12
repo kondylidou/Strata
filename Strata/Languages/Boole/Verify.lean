@@ -155,14 +155,19 @@ private theorem getFVarIsOp_spec (st : TranslateState) (m : SourceRange) (i : Na
         | some (_,    .type _ _) => b = false
         | none => False
     | .error _ => st.gctx.vars[i]?.isNone := by
-  simp only [getFVarIsOp, throwAt, TranslateState.isGlobalVar]
   cases h : st.gctx.vars[i]? with
-  | none => simp [h, Option.isNone]
+  | none =>
+    simp [getFVarIsOp, throwAt, TranslateState.isGlobalVar, h]
+    exact True.intro
   | some p =>
     obtain ⟨name, k⟩ := p
     cases k with
-    | expr _ => simp [h]
-    | type _ _ => simp [h]
+    | expr _ =>
+      simp [getFVarIsOp, throwAt, TranslateState.isGlobalVar, h]
+      exact ⟨rfl, rfl⟩
+    | type _ _ =>
+      simp [getFVarIsOp, throwAt, TranslateState.isGlobalVar, h]
+      exact ⟨rfl, rfl⟩
 
 private def getBVarExpr (m : SourceRange) (i : Nat) : TranslateM Core.Expression.Expr := do
   let xs := (← get).bvars
