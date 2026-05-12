@@ -19,13 +19,17 @@ namespace Strata.Boole
 
 open Lambda
 
-/--
-Boole verification pipeline:
+/-- Translation state for lowering a Boole program to Core.
 
-`Strata.Program` -> `BooleDDM.Program.ofAst` -> `BooleDDM.Program`
--> `toCoreProgram` -> `Core.Program` -> `Core.verify`
--/
+    Pipeline: `Strata.Program` → `BooleDDM.Program.ofAst` → `BooleDDM.Program`
+    → `toCoreProgram` → `Core.Program` → `Core.verify`
 
+    Op-vs-var classification for free variable references is derived from
+    `gctx.vars` directly (populated by the DDM elaborator with exact
+    per-symbol entries for datatypes, rec-fn blocks, etc.). The only
+    carve-out is `command_var` globals, which are stored as `.expr` in
+    `gctx` but must be emitted as `.fvar` after lowering to procedure
+    parameters — see `getFVarIsOp`. -/
 structure TranslateState where
   fileName : String := ""
   gctx : GlobalContext := {}
@@ -39,8 +43,12 @@ structure TranslateState where
   /-- Names of in-out parameters for the current procedure being translated.
       `old x` is only applied to these variables; for others `old x = x`. -/
   currentInoutNames : List String := []
-  /-- Types of global variables, collected in a pre-pass.
-      Used to add globals as input parameters to procedures. -/
+  /-- Types of `command_var` globals, collected in a pre-pass.
+      Invariant: a name is present here iff introduced by `command_var`.
+      Dual role: (1) the *values* are used by `getGlobalParamPrefix` to
+      assemble procedure parameter lists; (2) the *key set* is used by
+      `getFVarIsOp` as the `command_var` carve-out for op-vs-var
+      classification. -/
   globalVarTypes : Std.HashMap String Lambda.LMonoTy := {}
 
 abbrev TranslateM := StateT TranslateState (Except DiagnosticModel)
@@ -109,14 +117,52 @@ private def getFVarName (m : SourceRange) (i : Nat) : TranslateM String := do
   | some n => return n
   | none => throwAt m s!"Unknown free variable with index {i}"
 
+/-- A name is a `command_var` global iff it appears in `globalVarTypes`.
+    Maintained by the pre-pass in `toCoreProgram`. -/
+private def TranslateState.isGlobalVar (st : TranslateState) (name : String) : Bool :=
+  st.globalVarTypes.contains name
+
+/-- Classify `gctx.vars[i]` as op (`true`) or term (`false`).
+
+    `gctx.vars` entries per command kind:
+    - `datatype`:          1 (type) + #ctors + #testers + #selectors
+    - `command_recfndefs`: #functions
+    - `typedecl` / `constdecl` / `fndecl` / `fndef`: 1
+    - `command_var`:       1 (carved out via `globalVarTypes`)
+    - `procedure` / `block` / `axiom` / `distinct`: 0
+-/
 private def getFVarIsOp (m : SourceRange) (i : Nat) : TranslateM Bool := do
   let st ← get
   match st.gctx.vars[i]? with
-  -- Global variables (command_var) become procedure parameters, not function
-  -- symbols; emit them as .fvar even though gctx stores them as .expr.
-  | some (name, .expr _) => return !st.globalVarTypes.contains name
+  -- Classification is derived from `gctx.vars` (the single source of truth
+  -- populated by the DDM elaborator). Only carve-out: names introduced by
+  -- `command_var` are stored in `gctx` as `.expr` but lowered to procedure
+  -- parameters, so they must be emitted as `.fvar`. The carve-out relies on
+  -- the invariant that a name appears in `globalVarTypes` iff it was
+  -- introduced by a `command_var`.
+  | some (name, .expr _) => return !st.isGlobalVar name
   | some (_, .type _ _) => return false
   | none => throwAt m s!"Unknown free variable with index {i}"
+
+/-- `getFVarIsOp` agrees with `gctx.vars` classification, with `command_var`
+    names carved out as terms. -/
+private theorem getFVarIsOp_spec (st : TranslateState) (m : SourceRange) (i : Nat) :
+    match (getFVarIsOp m i).run st with
+    | .ok (b, st') =>
+        st' = st ∧
+        match st.gctx.vars[i]? with
+        | some (name, .expr _) => b = !st.globalVarTypes.contains name
+        | some (_,    .type _ _) => b = false
+        | none => False
+    | .error _ => st.gctx.vars[i]?.isNone := by
+  simp only [getFVarIsOp, throwAt, TranslateState.isGlobalVar]
+  cases h : st.gctx.vars[i]? with
+  | none => simp [h, Option.isNone]
+  | some p =>
+    obtain ⟨name, k⟩ := p
+    cases k with
+    | expr _ => simp [h]
+    | type _ _ => simp [h]
 
 private def getBVarExpr (m : SourceRange) (i : Nat) : TranslateM Core.Expression.Expr := do
   let xs := (← get).bvars
