@@ -119,6 +119,14 @@ fn seq_empty_bv16 () : Sequence bv16 => "Sequence.empty_bv16";
 fn seq_empty_bv32 () : Sequence bv32 => "Sequence.empty_bv32";
 fn seq_empty_bv64 () : Sequence bv64 => "Sequence.empty_bv64";
 fn seq_empty_int  () : Sequence int  => "Sequence.empty_int";
+
+// Sequence literals: Sequence.of_bv32[v0, v1, ..., vn]
+// Lowers to a left-fold of seq_build over seq_empty.
+fn seq_of_bv8  (vs : CommaSepBy Expr) : Sequence bv8  => "Sequence.of_bv8["  vs "]";
+fn seq_of_bv16 (vs : CommaSepBy Expr) : Sequence bv16 => "Sequence.of_bv16[" vs "]";
+fn seq_of_bv32 (vs : CommaSepBy Expr) : Sequence bv32 => "Sequence.of_bv32[" vs "]";
+fn seq_of_bv64 (vs : CommaSepBy Expr) : Sequence bv64 => "Sequence.of_bv64[" vs "]";
+fn seq_of_int  (vs : CommaSepBy Expr) : Sequence int  => "Sequence.of_int["  vs "]";
 fn seq_skip (A : Type, s : Sequence A, n : int) : Sequence A =>
   "Sequence.skip" "(" s ", " n ")";
 fn seq_drop_first (A : Type, s : Sequence A) : Sequence A =>

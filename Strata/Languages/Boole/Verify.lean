@@ -303,7 +303,7 @@ private def oldifyExpr (inoutNames : List String) : Core.Expression.Expr → Cor
 
 mutual
 
-def toCoreQuant
+partial def toCoreQuant
     (isForall : Bool)
     (ds : BooleDDM.DeclList SourceRange)
     (body : Boole.Expr) : TranslateM Core.Expression.Expr := do
@@ -324,7 +324,7 @@ lowering into Core. Legacy dotted Unicode separators are normalized earlier in
 `Strata.DDM.Elab`, so this helper only needs to collapse the remaining AST
 constructor variants.
 -/
-private def toCoreQuantExpr? (e : Boole.Expr) : Option (TranslateM Core.Expression.Expr) :=
+private partial def toCoreQuantExpr? (e : Boole.Expr) : Option (TranslateM Core.Expression.Expr) :=
   match e with
   | .forall _ ds body
   | .forall_unicode _ ds body
@@ -338,7 +338,7 @@ private def toCoreQuantExpr? (e : Boole.Expr) : Option (TranslateM Core.Expressi
       some (toCoreQuant false ds body)
   | _ => none
 
-def toCoreExpr (e : Boole.Expr) : TranslateM Core.Expression.Expr := do
+partial def toCoreExpr (e : Boole.Expr) : TranslateM Core.Expression.Expr := do
   if let some q := toCoreQuantExpr? e then
     return ← q
   match e with
@@ -425,6 +425,12 @@ def toCoreExpr (e : Boole.Expr) : TranslateM Core.Expression.Expr := do
   -- Typed empty-sequence constant (Sequence.empty for bv32; other types can be added when needed).
   | .seq_empty_bv8 _ | .seq_empty_bv16 _ | .seq_empty_bv32 _
   | .seq_empty_bv64 _ | .seq_empty_int _ => return Core.seqEmptyOp
+  -- Sequence literals: Sequence.of_bv32[v0, v1, ..., vn]
+  -- Lowers to a left-fold of seq_build over seq_empty.
+  | .seq_of_bv8  _ ⟨_, vs⟩ | .seq_of_bv16 _ ⟨_, vs⟩ | .seq_of_bv32 _ ⟨_, vs⟩
+  | .seq_of_bv64 _ ⟨_, vs⟩ | .seq_of_int  _ ⟨_, vs⟩ => do
+    let vals ← vs.toList.mapM toCoreExpr
+    return vals.foldl (fun acc v => mkCoreApp Core.seqBuildOp [acc, v]) Core.seqEmptyOp
   -- Lambda abstraction: `fun x : T => body`  →  Core .abs
   | .lambda _ _ decls body => do
       let declsList := declListToList decls

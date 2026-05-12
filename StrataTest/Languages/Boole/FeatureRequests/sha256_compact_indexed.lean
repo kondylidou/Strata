@@ -42,7 +42,24 @@ program Boole;
  function Set_finite<T> (s : Set T) : bool;
  function bv8_to_bv32_u (x : bv8) : bv32;
  function k32 () : Sequence bv32 {
-  Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.empty_bv32, bv{32}(1116352408)), bv{32}(1899447441)), bv{32}(3049323471)), bv{32}(3921009573)), bv{32}(961987163)), bv{32}(1508970993)), bv{32}(2453635748)), bv{32}(2870763221)), bv{32}(3624381080)), bv{32}(310598401)), bv{32}(607225278)), bv{32}(1426881987)), bv{32}(1925078388)), bv{32}(2162078206)), bv{32}(2614888103)), bv{32}(3248222580)), bv{32}(3835390401)), bv{32}(4022224774)), bv{32}(264347078)), bv{32}(604807628)), bv{32}(770255983)), bv{32}(1249150122)), bv{32}(1555081692)), bv{32}(1996064986)), bv{32}(2554220882)), bv{32}(2821834349)), bv{32}(2952996808)), bv{32}(3210313671)), bv{32}(3336571891)), bv{32}(3584528711)), bv{32}(113926993)), bv{32}(338241895)), bv{32}(666307205)), bv{32}(773529912)), bv{32}(1294757372)), bv{32}(1396182291)), bv{32}(1695183700)), bv{32}(1986661051)), bv{32}(2177026350)), bv{32}(2456956037)), bv{32}(2730485921)), bv{32}(2820302411)), bv{32}(3259730800)), bv{32}(3345764771)), bv{32}(3516065817)), bv{32}(3600352804)), bv{32}(4094571909)), bv{32}(275423344)), bv{32}(430227734)), bv{32}(506948616)), bv{32}(659060556)), bv{32}(883997877)), bv{32}(958139571)), bv{32}(1322822218)), bv{32}(1537002063)), bv{32}(1747873779)), bv{32}(1955562222)), bv{32}(2024104815)), bv{32}(2227730452)), bv{32}(2361852424)), bv{32}(2428436474)), bv{32}(2756734187)), bv{32}(3204031479)), bv{32}(3329325298))
+  Sequence.of_bv32[
+    bv{32}(1116352408), bv{32}(1899447441), bv{32}(3049323471), bv{32}(3921009573),
+    bv{32}(961987163),  bv{32}(1508970993), bv{32}(2453635748), bv{32}(2870763221),
+    bv{32}(3624381080), bv{32}(310598401),  bv{32}(607225278),  bv{32}(1426881987),
+    bv{32}(1925078388), bv{32}(2162078206), bv{32}(2614888103), bv{32}(3248222580),
+    bv{32}(3835390401), bv{32}(4022224774), bv{32}(264347078),  bv{32}(604807628),
+    bv{32}(770255983),  bv{32}(1249150122), bv{32}(1555081692), bv{32}(1996064986),
+    bv{32}(2554220882), bv{32}(2821834349), bv{32}(2952996808), bv{32}(3210313671),
+    bv{32}(3336571891), bv{32}(3584528711), bv{32}(113926993),  bv{32}(338241895),
+    bv{32}(666307205),  bv{32}(773529912),  bv{32}(1294757372), bv{32}(1396182291),
+    bv{32}(1695183700), bv{32}(1986661051), bv{32}(2177026350), bv{32}(2456956037),
+    bv{32}(2730485921), bv{32}(2820302411), bv{32}(3259730800), bv{32}(3345764771),
+    bv{32}(3516065817), bv{32}(3600352804), bv{32}(4094571909), bv{32}(275423344),
+    bv{32}(430227734),  bv{32}(506948616),  bv{32}(659060556),  bv{32}(883997877),
+    bv{32}(958139571),  bv{32}(1322822218), bv{32}(1537002063), bv{32}(1747873779),
+    bv{32}(1955562222), bv{32}(2024104815), bv{32}(2227730452), bv{32}(2361852424),
+    bv{32}(2428436474), bv{32}(2756734187), bv{32}(3204031479), bv{32}(3329325298)
+  ]
 }
  procedure rotate_right (x : bv32, n : bv32) returns (_pct_return : bv32)
 spec {
@@ -58,7 +75,12 @@ spec {
   } {
   var j : int;
   var res : (Sequence bv32);
-  res := Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.build(Sequence.empty_bv32, bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0)), bv{32}(0));
+  res := Sequence.of_bv32[
+    bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0),
+    bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0),
+    bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0),
+    bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0)
+  ];
   for i : int := 0 to 15
   {
     j := i * 4;
@@ -204,71 +226,71 @@ spec {
 #end
 
 /-- info:
-Obligation: assert_1_4048
+Obligation: assert_1_3101
 Property: assert
 Result: ✅ pass
 
-Obligation: assert_2_4091
+Obligation: assert_2_3144
 Property: assert
 Result: ✅ pass
 
-Obligation: assert_3_4881
+Obligation: assert_3_3695
 Property: assert
 Result: ✅ pass
 
-Obligation: assert_4_4912
+Obligation: assert_4_3726
 Property: assert
 Result: ✅ pass
 
-Obligation: assert_5_4943
+Obligation: assert_5_3757
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3997_39
+Obligation: callElimAssert_rotate_right_requires_0_3050_39
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3997_35
+Obligation: callElimAssert_rotate_right_requires_0_3050_35
 Property: assert
 Result: ✅ pass
 
-Obligation: assert_7_6617
+Obligation: assert_7_5431
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3997_31
+Obligation: callElimAssert_rotate_right_requires_0_3050_31
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3997_27
+Obligation: callElimAssert_rotate_right_requires_0_3050_27
 Property: assert
 Result: ✅ pass
 
-Obligation: assert_8_6856
+Obligation: assert_8_5670
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3997_23
+Obligation: callElimAssert_rotate_right_requires_0_3050_23
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3997_19
+Obligation: callElimAssert_rotate_right_requires_0_3050_19
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3997_15
+Obligation: callElimAssert_rotate_right_requires_0_3050_15
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3997_11
+Obligation: callElimAssert_rotate_right_requires_0_3050_11
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3997_7
+Obligation: callElimAssert_rotate_right_requires_0_3050_7
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3997_3
+Obligation: callElimAssert_rotate_right_requires_0_3050_3
 Property: assert
 Result: ✅ pass
 
