@@ -47,7 +47,7 @@ fn mul(self, _rhs: &'a FieldElement51) -> (output: FieldElement51)
 
 ## Benchmark 2 — `Scalar::from_bytes_mod_order_wide`
 
-**49 lines** (scalar.rs:300–348) · 13 exec statements
+**49 lines** (scalar.rs:300–348) · 2 exec statements
 
 ```rust
 pub fn from_bytes_mod_order_wide(input: &[u8; 64]) -> (result: Scalar)
@@ -58,8 +58,9 @@ pub fn from_bytes_mod_order_wide(input: &[u8; 64]) -> (result: Scalar)
 ```
 
 - Reduces a 64-byte SHA-512 hash to a canonical EdDSA signing scalar `r`.
-- First two postconditions: canonical encoding; absent canonicality caused malleability vulnerabilities in OpenSSL and tinyssh (RFC 8032 §5.1.7).
-- Third postcondition: uniform input → uniform output, required for nonce secrecy (biased nonce leaks the private key, cf. ECDSA PS3 attack).
+- First postcondition: correctness — output equals input reduced mod ℓ (the function computes the right value).
+- Second postcondition: canonicality — output is the unique representative in [0, ℓ) with high bit clear; absent this, two distinct byte strings can represent the same scalar, enabling signature malleability (CVE in OpenSSL and tinyssh, RFC 8032 §5.1.7).
+- Third postcondition: uniformity — uniform 512-bit input produces a statistically uniform scalar; a biased nonce leaks the private key (cf. ECDSA PS3 attack).
 
 ---
 
