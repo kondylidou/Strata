@@ -42,24 +42,7 @@ program Boole;
  function Set_finite<T> (s : Set T) : bool;
  function bv8_to_bv32_u (x : bv8) : bv32;
  function k32 () : Sequence bv32 {
-  Sequence.of_bv32[
-    bv{32}(1116352408), bv{32}(1899447441), bv{32}(3049323471), bv{32}(3921009573),
-    bv{32}(961987163),  bv{32}(1508970993), bv{32}(2453635748), bv{32}(2870763221),
-    bv{32}(3624381080), bv{32}(310598401),  bv{32}(607225278),  bv{32}(1426881987),
-    bv{32}(1925078388), bv{32}(2162078206), bv{32}(2614888103), bv{32}(3248222580),
-    bv{32}(3835390401), bv{32}(4022224774), bv{32}(264347078),  bv{32}(604807628),
-    bv{32}(770255983),  bv{32}(1249150122), bv{32}(1555081692), bv{32}(1996064986),
-    bv{32}(2554220882), bv{32}(2821834349), bv{32}(2952996808), bv{32}(3210313671),
-    bv{32}(3336571891), bv{32}(3584528711), bv{32}(113926993),  bv{32}(338241895),
-    bv{32}(666307205),  bv{32}(773529912),  bv{32}(1294757372), bv{32}(1396182291),
-    bv{32}(1695183700), bv{32}(1986661051), bv{32}(2177026350), bv{32}(2456956037),
-    bv{32}(2730485921), bv{32}(2820302411), bv{32}(3259730800), bv{32}(3345764771),
-    bv{32}(3516065817), bv{32}(3600352804), bv{32}(4094571909), bv{32}(275423344),
-    bv{32}(430227734),  bv{32}(506948616),  bv{32}(659060556),  bv{32}(883997877),
-    bv{32}(958139571),  bv{32}(1322822218), bv{32}(1537002063), bv{32}(1747873779),
-    bv{32}(1955562222), bv{32}(2024104815), bv{32}(2227730452), bv{32}(2361852424),
-    bv{32}(2428436474), bv{32}(2756734187), bv{32}(3204031479), bv{32}(3329325298)
-  ]
+  Sequence.of_bv32[bv{32}(1116352408), bv{32}(1899447441), bv{32}(3049323471), bv{32}(3921009573), bv{32}(961987163), bv{32}(1508970993), bv{32}(2453635748), bv{32}(2870763221), bv{32}(3624381080), bv{32}(310598401), bv{32}(607225278), bv{32}(1426881987), bv{32}(1925078388), bv{32}(2162078206), bv{32}(2614888103), bv{32}(3248222580), bv{32}(3835390401), bv{32}(4022224774), bv{32}(264347078), bv{32}(604807628), bv{32}(770255983), bv{32}(1249150122), bv{32}(1555081692), bv{32}(1996064986), bv{32}(2554220882), bv{32}(2821834349), bv{32}(2952996808), bv{32}(3210313671), bv{32}(3336571891), bv{32}(3584528711), bv{32}(113926993), bv{32}(338241895), bv{32}(666307205), bv{32}(773529912), bv{32}(1294757372), bv{32}(1396182291), bv{32}(1695183700), bv{32}(1986661051), bv{32}(2177026350), bv{32}(2456956037), bv{32}(2730485921), bv{32}(2820302411), bv{32}(3259730800), bv{32}(3345764771), bv{32}(3516065817), bv{32}(3600352804), bv{32}(4094571909), bv{32}(275423344), bv{32}(430227734), bv{32}(506948616), bv{32}(659060556), bv{32}(883997877), bv{32}(958139571), bv{32}(1322822218), bv{32}(1537002063), bv{32}(1747873779), bv{32}(1955562222), bv{32}(2024104815), bv{32}(2227730452), bv{32}(2361852424), bv{32}(2428436474), bv{32}(2756734187), bv{32}(3204031479), bv{32}(3329325298)]
 }
  procedure rotate_right (x : bv32, n : bv32) returns (_pct_return : bv32)
 spec {
@@ -75,21 +58,14 @@ spec {
   } {
   var j : int;
   var res : (Sequence bv32);
-  res := Sequence.of_bv32[
-    bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0),
-    bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0),
-    bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0),
-    bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0)
-  ];
-  for i : int := 0 to 15
-  {
+  res := Sequence.of_bv32[bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0), bv{32}(0)];
+  for i : int := 0 to 16 - 1{
     j := i * 4;
     assert 0 <= 24 && 24 < 32;
     assert 0 <= 16 && 16 < 32;
     assert 0 <= 8 && 8 < 32;
     res := Sequence.update(res, i, bv8_to_bv32_u(Sequence.select(block, j)) << bv{32}(24) | (bv8_to_bv32_u(Sequence.select(block, j + 1)) << bv{32}(16)) | (bv8_to_bv32_u(Sequence.select(block, j + 2)) << bv{32}(8)) | bv8_to_bv32_u(Sequence.select(block, j + 3)));
   }
-
   _pct_return := res;
   exit to_u32s;
 };
@@ -137,11 +113,11 @@ spec {
   f := Sequence.select(state_out, 5);
   g := Sequence.select(state_out, 6);
   h := Sequence.select(state_out, 7);
-  for i : int := 0 to 63
-  {
+  for i : int := 0 to 64 - 1{
     if (i < 16) {
       tmp36 := Sequence.select(block_local, i);
     } else {
+      assert bv{64}(16) != bv{64}(0);
       w15 := Sequence.select(block_local, (i - 15) mod 16);
       call tmp15 := rotate_right(w15, bv{32}(7));
 
@@ -149,6 +125,7 @@ spec {
 
       assert 0 <= 3 && 3 < 32;
       s0 := tmp15 ^ tmp16 ^ (w15 >> bv{32}(3));
+      assert bv{64}(16) != bv{64}(0);
       w2 := Sequence.select(block_local, (i - 2) mod 16);
       call tmp22 := rotate_right(w2, bv{32}(17));
 
@@ -156,7 +133,10 @@ spec {
 
       assert 0 <= 10 && 10 < 32;
       s1 := tmp22 ^ tmp23 ^ (w2 >> bv{32}(10));
+      assert bv{64}(16) != bv{64}(0);
+      assert bv{64}(16) != bv{64}(0);
       new_w := Sequence.select(block_local, (i - 16) mod 16) + s0 + Sequence.select(block_local, (i - 7) mod 16) + s1;
+      assert bv{64}(16) != bv{64}(0);
       block_local := Sequence.update(block_local, i mod 16, new_w);
       tmp36 := new_w;
     }
@@ -202,19 +182,13 @@ spec {
  procedure compress (state : Sequence bv32, blocks : Sequence (Sequence bv8)) returns (state_out : (Sequence bv32))
 spec {
   } {
-  var tmp4 : (Sequence bv32);
-  var k : int;
+  var tmp6 : (Sequence bv32);
   state_out := state;
-  k := 0;
-  while (k < Sequence.length(blocks))
-  decreases Sequence.length(blocks) - k
-  invariant k <= Sequence.length(blocks)
-  {
-    call tmp4 := to_u32s(Sequence.select(blocks, k));
+  for k : int := 0 to Sequence.length(blocks) - 1{
+    call tmp6 := to_u32s(Sequence.select(blocks, k));
 
-    call state_out := compress_u32(state_out, tmp4);
+    call state_out := compress_u32(state_out, tmp6);
 
-    k := k + 1;
   }
   exit compress;
 };
@@ -226,87 +200,91 @@ spec {
 #end
 
 /-- info:
-Obligation: assert_1_3101
+Obligation: assert_1_3021
 Property: assert
 Result: ✅ pass
 
-Obligation: assert_2_3144
+Obligation: assert_2_3064
 Property: assert
 Result: ✅ pass
 
-Obligation: assert_3_3695
+Obligation: assert_3_3596
 Property: assert
 Result: ✅ pass
 
-Obligation: assert_4_3726
+Obligation: assert_4_3627
 Property: assert
 Result: ✅ pass
 
-Obligation: assert_5_3757
+Obligation: assert_5_3658
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3050_39
+Obligation: assert_7_5169
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3050_35
+Obligation: callElimAssert_rotate_right_requires_0_2970_39
 Property: assert
 Result: ✅ pass
 
-Obligation: assert_7_5431
+Obligation: callElimAssert_rotate_right_requires_0_2970_35
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3050_31
+Obligation: assert_8_5370
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3050_27
+Obligation: assert_9_5449
 Property: assert
 Result: ✅ pass
 
-Obligation: assert_8_5670
+Obligation: callElimAssert_rotate_right_requires_0_2970_31
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3050_23
+Obligation: callElimAssert_rotate_right_requires_0_2970_27
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3050_19
+Obligation: assert_10_5647
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3050_15
+Obligation: assert_11_5728
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3050_11
+Obligation: assert_12_5766
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3050_7
+Obligation: assert_13_5923
 Property: assert
 Result: ✅ pass
 
-Obligation: callElimAssert_rotate_right_requires_0_3050_3
+Obligation: callElimAssert_rotate_right_requires_0_2970_23
 Property: assert
 Result: ✅ pass
 
-Obligation: entry_invariant_0_0
+Obligation: callElimAssert_rotate_right_requires_0_2970_19
 Property: assert
 Result: ✅ pass
 
-Obligation: measure_lb_0
+Obligation: callElimAssert_rotate_right_requires_0_2970_15
 Property: assert
 Result: ✅ pass
 
-Obligation: arbitrary_iter_maintain_invariant_0_0
+Obligation: callElimAssert_rotate_right_requires_0_2970_11
 Property: assert
 Result: ✅ pass
 
-Obligation: measure_decrease_0
+Obligation: callElimAssert_rotate_right_requires_0_2970_7
+Property: assert
+Result: ✅ pass
+
+Obligation: callElimAssert_rotate_right_requires_0_2970_3
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in
