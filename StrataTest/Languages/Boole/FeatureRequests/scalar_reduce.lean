@@ -19,12 +19,12 @@ Implemented:
 - `ByteArray64` and `Scalar` kept abstract — no byte-array indexing or
   struct-field access needed for this seed.
 - `u8_64_as_group_canonical` stays abstract; its recursive byte-accumulation
-  definition requires int-based termination over sequences (open Gap #11).
+  definition requires int-based termination over sequences (→ #1167).
 - Two axioms capture what `reduce` guarantees; the procedure body verifies
   by axiom instantiation alone.
 
 Remaining gap:
-- Spelling out `u8_64_as_group_canonical` recursively requires Gap #11.
+- Spelling out `u8_64_as_group_canonical` recursively requires Gap #11 (→ #1167).
 - `Scalar { bytes }` struct construction requires Gap #13.
 -/
 
@@ -40,6 +40,31 @@ function scalar_as_canonical(s: Scalar) : int;
 function u8_64_as_group_canonical(b: ByteArray64) : int;
 function is_canonical_scalar(s: Scalar) : bool;
 
+// Once Gap #11 closes (PR #1167), u8_64_as_group_canonical can be given a
+// real recursive definition using Sequence bv8.  The recursive
+// byte-accumulation (little-endian) follows dalek-lite's bytes_seq_as_nat
+// (curve25519-dalek/src/specs/core_specs.rs):
+//
+//   function bv8_to_int_u(x: bv8) : int;
+//   function group_order() : int;
+//
+//   rec function bytes_seq_as_nat(b: Sequence bv8) : int
+//     decreases Sequence.length(b)
+//   {
+//     if Sequence.length(b) == 0 then
+//       0
+//     else
+//       bv8_to_int_u(Sequence.select(b, 0)) + 256 * bytes_seq_as_nat(Sequence.skip(b, 1))
+//   }
+//
+//   function u8_64_as_group_canonical(b: Sequence bv8) : int {
+//     bytes_seq_as_nat(b) mod group_order()
+//   }
+//
+// Note: int-recursive functions are pure UFs in SMT (no definitional axioms).
+// Functional properties still require manual axioms — the two axioms below
+// (scalar_as_canonical/reduce and is_canonical_scalar/reduce) continue to apply.
+
 axiom (∀ b: ByteArray64 . scalar_as_canonical(reduce(b)) == u8_64_as_group_canonical(b));
 axiom (∀ b: ByteArray64 . is_canonical_scalar(reduce(b)));
 
@@ -54,11 +79,11 @@ spec {
 #end
 
 /-- info:
-Obligation: from_bytes_mod_order_wide_ensures_2_1528
+Obligation: from_bytes_mod_order_wide_ensures_2_2504
 Property: assert
 Result: ✅ pass
 
-Obligation: from_bytes_mod_order_wide_ensures_3_1602
+Obligation: from_bytes_mod_order_wide_ensures_3_2578
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in

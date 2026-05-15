@@ -113,6 +113,24 @@ example : Strata.smtVCsCorrect decreasesFunctionSeed := by
   gen_smt_vcs
   all_goals (try grind)
 
+-- Recursive spec function over int — uncomment once PR #1167 ("Add
+-- int-valued recursion with termination checking") merges.
+-- `decreases n` is accepted; termination obligations check non-negativity and
+-- strict decrease at each recursive call.  Pure UF in SMT (no definitional
+-- axioms); functional properties need manual axioms.
+--
+-- private def fibSeed : Strata.Program :=
+-- #strata
+-- program Boole;
+--
+-- rec function fib(n: int) : int
+--   decreases n
+-- {
+--   if n <= 1 then n else fib(n - 1) + fib(n - 2)
+-- }
+--
+-- #end
+
 -- `decreases` clause in a `for v := init to limit` loop.
 private def decreasesForLoopSeed : Strata.Program :=
 #strata
@@ -160,7 +178,7 @@ Obligation: measure_decrease_0
 Property: assert
 Result: ✅ pass
 
-Obligation: for_decreases_seed_ensures_1_2761
+Obligation: for_decreases_seed_ensures_1_3302
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in

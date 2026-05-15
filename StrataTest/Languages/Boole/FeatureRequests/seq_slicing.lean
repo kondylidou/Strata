@@ -65,14 +65,20 @@ spec {
   s := Sequence.build(Sequence.empty_bv64, bv{64}(0));
 };
 
-// Recursive reconstruct — target shape, not yet verifiable:
-// requires int-based termination proofs (open gap).
+// Recursive reconstruct — uncomment once PR #1167 ("Add int-valued recursion
+// with termination checking") merges.  The `decreases Sequence.length(naf)`
+// measure is now accepted; termination is checked (non-negativity + strict
+// decrease).  Note: int-recursive functions are pure UFs in SMT — no
+// definitional axioms are generated, so functional properties (e.g. that
+// reconstruct([1, 0, -1]) == -3) still require manual axioms.
 //
-// function reconstruct(naf: Sequence int) : int
-//   decreases Sequence.length(naf);
+// rec function reconstruct(naf: Sequence int) : int
+//   decreases Sequence.length(naf)
 // {
-//   if Sequence.length(naf) == 0 { 0 }
-//   else { Sequence.select(naf, 0) + 2 * reconstruct(Sequence.skip(naf, 1)) }
+//   if Sequence.length(naf) == 0 then
+//     0
+//   else
+//     Sequence.select(naf, 0) + 2 * reconstruct(Sequence.skip(naf, 1))
 // }
 #end
 
@@ -128,7 +134,7 @@ spec {
 #end
 
 /-- info:
-Obligation: seq_oob_seed_ensures_0_3628
+Obligation: seq_oob_seed_ensures_0_3968
 Property: assert
 Result: ❓ unknown-/
 #guard_msgs in
