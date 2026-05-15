@@ -160,6 +160,7 @@ seeds live in
 | 1 | `FieldElement51.limbs: [u64; 5]` | #13 | ○ open | Sub-case of Gap #13: `limbs` is a struct field whose type is itself a fixed-size array. Planned encoding: flatten into five named `int` fields (`limb0`…`limb4`) rather than `Map int bv64` — same gap, not a separate one |
 | 2 | `[u8; 64]` byte arrays | #25 | ○ open | `input: &[u8; 64]` as `Map int bv8`; SMT backend resolved by PR #795; remaining gap is Boole syntax (initializer, write-back) |
 | 5 | `[u8; 32]` byte arrays | #25 | ○ open | Same as B2; SMT backend resolved by PR #795 |
+| 2,5 | Widening casts (`e as_int`) | #6 | ✓ done | `Bv{n}.ToNat` → `bv2nat`; bv1/8/16/32/64/128; see [`cast_expr.lean`](../StrataTest/Languages/Boole/FeatureRequests/cast_expr.lean) |
 | 2 | `reduce()` spec function | — | ✓ done | Axiom pattern verified in [`scalar_reduce.lean`](../StrataTest/Languages/Boole/FeatureRequests/scalar_reduce.lean); `u8_64_as_group_canonical` gains a recursive definition once Gap #11 closes (→ #1167), pure UF in SMT, manual axioms unchanged |
 | 2 | `is_uniform_scalar` axiom | — | ○ open | Probabilistic postcondition needs abstract `is_uniform_bytes`/`is_uniform_scalar` predicates as Boole axioms |
 | 3 | `Option<EdwardsPoint>` return | — | ○ open | Boole has no native `Option<T>` type and no `matches` destructuring in spec clauses; see [`option_matches.lean`](../StrataTest/Languages/Boole/FeatureRequests/option_matches.lean) |
