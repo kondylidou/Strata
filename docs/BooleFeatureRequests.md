@@ -72,12 +72,18 @@ This document tracks the selected Boole feature-request seeds kept under
 3. **`reveal_with_fuel`**: Lower priority. Preserve the requested fuel amount instead of lowering it to an unrestricted reveal.
 4. **`closed` visibility**: Lower priority. Keep closed spec-function bodies hidden across module boundaries.
 5. **Overflow guards**: Lower priority. Preserve `HasType`-style arithmetic overflow checks if Verus-specific guards are worth modeling directly.
-6. **Widening casts outside call sites**: Insert or preserve cast/coercion structure in comparisons, quantifiers, and other expressions with a centralized type-directed coercion pass.
+6. **Widening casts outside call sites**: Partially implemented.
+   - **BV→int (`e as_int`)**: Implemented. Lowers to `Bv{n}.ToNat` Core op → SMT-LIB `bv2nat`. Supported widths: `bv1`, `bv8`, `bv16`, `bv32`, `bv64`, `bv128`. Works in all expression contexts (comparisons, quantifiers, `let`, `rec function`).
+     - Benchmark: [`widening_casts.lean`](../StrataTest/Languages/Boole/FeatureRequests/widening_casts.lean), [`cast_expr.lean`](../StrataTest/Languages/Boole/FeatureRequests/cast_expr.lean), [`cast_nested.lean`](../StrataTest/Languages/Boole/FeatureRequests/cast_nested.lean).
+   - **Remaining**: int→BV narrowing cast (`x as bv32` etc.) not yet implemented. A centralized type-directed coercion pass (for implicit coercions at mixed-type boundaries) is also still open.
 7. **`decreases` metadata**: Implemented.
 
 ## Type/model requests
 
-8. **Native `nat` support**: Stop modeling `nat` as a purely abstract type with uninterpreted coercions.
+8. **Native `nat` support**: Partially implemented.
+   - **`type nat := int` synonym**: Nullary type synonyms expanding to `int` (e.g., `type nat := int`) are collected in a pre-pass. For each constructor field of that type, an auto-axiom `∀ x : DT . DT..isCtor(x) ⟹ DT..field(x) ≥ 0` is emitted. Arithmetic on `nat`-typed expressions routes to `Int.*` ops instead of the BV path.
+   - **Known limitation**: For datatypes mixing `nat`- and `int`-typed fields, the axiom is globally quantified over all SMT terms of that datatype type, including synthetic ones; this can create an inconsistency if the solver constructs a term that contradicts the axiom. Design alternatives are discussed in [`nat_axiom_discussion.lean`](../StrataTest/Languages/Boole/FeatureRequests/nat_axiom_discussion.lean).
+   - **Remaining**: Multi-level synonyms (e.g., `type Nat := nat`) are not followed transitively. Purely abstract `nat` (with uninterpreted coercions, no synonym) is not affected.
 9. **Missing model types**: Add or standardize support for model types such as `Cell`, `Atomic`, `Thread`, `Rwlock`, `Unit`, and `Arithmetic_overflow`.
 10. **On-demand stdlib/pervasive stubs**: Some pervasive stubs may be droppable after pruning translation output.
 11. **Sequence slicing**: Implemented. Int-based termination for recursive seq functions: implemented (#1167).
