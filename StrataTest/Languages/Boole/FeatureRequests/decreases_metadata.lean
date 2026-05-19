@@ -19,8 +19,7 @@ structural recursion. Procedure-level `decreases` is parsed (as `Option Measure`
 on `boole_procedure`, reusing Core's `Measure` category) and emits a `dbg_trace`
 warning when present; termination is not yet verified.
 
-Remaining gap: recursive functions over `int` need int-based termination
-proofs — structural recursion on `@[cases]` is the only supported form now.
+Int-based termination (#1167) is implemented; the `fib` seed below is active.
 -/
 
 private def decreasesMetadataSeed : Strata.Program :=
@@ -69,7 +68,7 @@ Obligation: measure_decrease_0
 Property: assert
 Result: ✅ pass
 
-Obligation: loop_measure_seed_ensures_1_938
+Obligation: loop_measure_seed_ensures_1_865
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in
@@ -103,7 +102,7 @@ spec {
 #end
 
 /-- info:
-Obligation: decreases_proc_seed_ensures_1_2216
+Obligation: decreases_proc_seed_ensures_1_2143
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in
@@ -113,23 +112,36 @@ example : Strata.smtVCsCorrect decreasesFunctionSeed := by
   gen_smt_vcs
   all_goals (try grind)
 
--- Recursive spec function over int — uncomment once PR #1167 ("Add
--- int-valued recursion with termination checking") merges.
--- `decreases n` is accepted; termination obligations check non-negativity and
--- strict decrease at each recursive call.  Pure UF in SMT (no definitional
--- axioms); functional properties need manual axioms.
---
--- private def fibSeed : Strata.Program :=
--- #strata
--- program Boole;
---
--- rec function fib(n: int) : int
---   decreases n
--- {
---   if n <= 1 then n else fib(n - 1) + fib(n - 2)
--- }
---
--- #end
+private def fibSeed : Strata.Program :=
+#strata
+program Boole;
+
+rec function fib(n: int) : int
+  decreases n
+{
+  if n <= 1 then n else fib(n - 1) + fib(n - 2)
+}
+;
+#end
+
+/-- info:
+Obligation: fib_terminates_0
+Property: assert
+Result: ✅ pass
+
+Obligation: fib_terminates_1
+Property: assert
+Result: ✅ pass
+
+Obligation: fib_terminates_2
+Property: assert
+Result: ✅ pass
+
+Obligation: fib_terminates_3
+Property: assert
+Result: ✅ pass-/
+#guard_msgs in
+#eval Strata.Boole.verify "cvc5" fibSeed (options := .quiet)
 
 -- `decreases` clause in a `for v := init to limit` loop.
 private def decreasesForLoopSeed : Strata.Program :=
@@ -178,7 +190,7 @@ Obligation: measure_decrease_0
 Property: assert
 Result: ✅ pass
 
-Obligation: for_decreases_seed_ensures_1_3302
+Obligation: for_decreases_seed_ensures_1_3201
 Property: assert
 Result: ✅ pass-/
 #guard_msgs in
