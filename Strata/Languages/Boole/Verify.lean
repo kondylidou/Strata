@@ -348,6 +348,12 @@ private def oldifyExpr (inoutNames : List String) : Core.Expression.Expr → Cor
   | .abs m n ty body => .abs m n ty (oldifyExpr inoutNames body)
   | e => e
 
+-- `toCoreQuant`, `toCoreQuantExpr?`, and `toCoreExpr` are marked `partial`
+-- because they form a mutually-recursive group and Lean's termination checker
+-- cannot verify the structural descent through the heterogeneous `Boole.Expr`
+-- AST within a `mutual` block.  Termination is guaranteed by the fact that
+-- every recursive call is on a strict sub-expression of the input (the AST
+-- is a finite tree); there are no looping or corecursive patterns.
 mutual
 
 partial def toCoreQuant
@@ -397,9 +403,12 @@ partial def toCoreExpr (e : Boole.Expr) : TranslateM Core.Expression.Expr := do
       return .fvar () id none
   | .bvar m i => getBVarExpr m i
   | .let_in_expr _ _bind value body =>
-    -- Assumption: `value` contains no free variables that share names with
-    -- binders in `body`.  Capture is not guarded against; all current seeds
-    -- are pure arithmetic with no name collisions.
+    -- TODO: implement capture-avoiding substitution.  Currently assumes
+    -- `value` has no free variables that share names with binders in `body`.
+    -- All current seeds are pure arithmetic so collisions do not arise,
+    -- but a user writing `let x := x + 1 in x` where `x` is also a quantifier
+    -- binder would get silently wrong output.  Fix: use a fresh de Bruijn
+    -- index and alpha-rename conflicting binders in `body` before lowering.
     let value' ← toCoreExpr value
     withBVarExprs #[value'] (toCoreExpr body)
   | .app _ f a => return .app () (← toCoreExpr f) (← toCoreExpr a)
@@ -473,7 +482,8 @@ partial def toCoreExpr (e : Boole.Expr) : TranslateM Core.Expression.Expr := do
   | .seq_empty_bv8 _ | .seq_empty_bv16 _ | .seq_empty_bv32 _
   | .seq_empty_bv64 _ | .seq_empty_int _ => return Core.seqEmptyOp
   -- Sequence literals: Sequence.of_bv32[v0, v1, ..., vn]
-  -- Lowers to a left-fold of seq_build over seq_empty.
+  -- `Sequence.build(s, v)` is snoc (s ++ [v]), so foldl from empty is correct:
+  --   foldl build [] [v0,v1,v2] = build(build(build([],v0),v1),v2) = [v0,v1,v2]
   | .seq_of_bv8  _ ⟨_, vs⟩ | .seq_of_bv16 _ ⟨_, vs⟩ | .seq_of_bv32 _ ⟨_, vs⟩
   | .seq_of_bv64 _ ⟨_, vs⟩ | .seq_of_int  _ ⟨_, vs⟩ => do
     let vals ← vs.toList.mapM toCoreExpr
@@ -937,6 +947,11 @@ private def translateProcedureDecl
 
 def toCoreDecls (cmd : BooleDDM.Command SourceRange) : TranslateM (List Core.Decl) := do
   match cmd with
+  -- The `decreases` clause on a `boole_procedure` is intentionally dropped
+  -- here (`_`).  Non-recursive procedures do not need a termination measure;
+  -- only `rec function` definitions (handled in `command_recfndefs` below)
+  -- carry a `measure` field into Core.  If Boole ever supports recursive
+  -- procedures, this field will need to be threaded through.
   | .boole_procedure m nameAnn targsAnn ins outsAnn _ specAnn bodyAnn =>
     let n := nameAnn.val
     let tys := match targsAnn.val with | none => [] | some ts => typeArgsToList ts
