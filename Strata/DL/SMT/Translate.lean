@@ -520,6 +520,9 @@ def translateTerm (t : SMT.Term) : TranslateM (Expr × Expr) := do
     let (α, x) ← translateTerm x
     let w ← getBitVecWidth α
     return (mkBitVec (w + i), mkApp3 (.const ``BitVec.zeroExtend []) (toExpr w) (toExpr (w + i)) x)
+  | .app .bv2nat [x] _ =>
+    let (_, x) ← translateTerm x
+    return (mkInt, mkApp (.const ``Int.ofNat []) (mkApp (.const ``BitVec.toNat []) x))
   -- SMT-Lib theory of strings
   | .prim (.string s) =>
     return (mkString, toExpr s)

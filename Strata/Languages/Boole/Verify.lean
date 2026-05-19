@@ -19,17 +19,20 @@ namespace Strata.Boole
 
 open Lambda
 
-/--
-Boole verification pipeline:
+/-- Translation state for lowering a Boole program to Core.
 
-`Strata.Program` -> `BooleDDM.Program.ofAst` -> `BooleDDM.Program`
--> `toCoreProgram` -> `Core.Program` -> `Core.verify`
--/
+    Pipeline: `Strata.Program` → `BooleDDM.Program.ofAst` → `BooleDDM.Program`
+    → `toCoreProgram` → `Core.Program` → `Core.verify`
 
+    Op-vs-var classification for free variable references is derived from
+    `gctx.vars` directly (populated by the DDM elaborator with exact
+    per-symbol entries for datatypes, rec-fn blocks, etc.). The only
+    carve-out is `command_var` globals, which are stored as `.expr` in
+    `gctx` but must be emitted as `.fvar` after lowering to procedure
+    parameters — see `getFVarIsOp`. -/
 structure TranslateState where
   fileName : String := ""
   gctx : GlobalContext := {}
-  fvarIsOp : Array Bool := #[]
   tyBVars : Array String := #[]
   bvars : Array Core.Expression.Expr := #[]
   labelCounter : Nat := 0
@@ -40,9 +43,17 @@ structure TranslateState where
   /-- Names of in-out parameters for the current procedure being translated.
       `old x` is only applied to these variables; for others `old x = x`. -/
   currentInoutNames : List String := []
-  /-- Types of global variables, collected in a pre-pass.
-      Used to add globals as input parameters to procedures. -/
+  /-- Types of `command_var` globals, collected in a pre-pass.
+      Invariant: a name is present here iff introduced by `command_var`.
+      Dual role: (1) the *values* are used by `getGlobalParamPrefix` to
+      assemble procedure parameter lists; (2) the *key set* is used by
+      `getFVarIsOp` as the `command_var` carve-out for op-vs-var
+      classification. -/
   globalVarTypes : Std.HashMap String Lambda.LMonoTy := {}
+  /-- Names of nullary type synonyms that expand directly to `int`, collected
+      in a pre-pass.  A field whose Boole type resolves to one of these names
+      is treated as `nat` and gets an automatic non-negativity axiom. -/
+  natSynonyms : Std.HashSet String := {}
 
 abbrev TranslateM := StateT TranslateState (Except DiagnosticModel)
 
@@ -110,15 +121,57 @@ private def getFVarName (m : SourceRange) (i : Nat) : TranslateM String := do
   | some n => return n
   | none => throwAt m s!"Unknown free variable with index {i}"
 
+/-- A name is a `command_var` global iff it appears in `globalVarTypes`.
+    Maintained by the pre-pass in `toCoreProgram`. -/
+private def TranslateState.isGlobalVar (st : TranslateState) (name : String) : Bool :=
+  st.globalVarTypes.contains name
+
+/-- Classify `gctx.vars[i]` as op (`true`) or term (`false`).
+
+    `gctx.vars` entries per command kind:
+    - `datatype`:          1 (type) + #ctors + #testers + #selectors
+    - `command_recfndefs`: #functions
+    - `typedecl` / `typesynonym` / `constdecl` / `fndecl` / `fndef`: 1
+    - `command_var`:       1 (carved out via `globalVarTypes`)
+    - `procedure` / `block` / `axiom` / `distinct`: 0
+-/
 private def getFVarIsOp (m : SourceRange) (i : Nat) : TranslateM Bool := do
   let st ← get
-  match st.fvarIsOp[i]? with
-  | some b => return b
+  match st.gctx.vars[i]? with
+  -- Classification is derived from `gctx.vars` (the single source of truth
+  -- populated by the DDM elaborator). Only carve-out: names introduced by
+  -- `command_var` are stored in `gctx` as `.expr` but lowered to procedure
+  -- parameters, so they must be emitted as `.fvar`. The carve-out relies on
+  -- the invariant that a name appears in `globalVarTypes` iff it was
+  -- introduced by a `command_var`.
+  | some (name, .expr _) => return !st.isGlobalVar name
+  | some (_, .type _ _) => return false
+  | none => throwAt m s!"Unknown free variable with index {i}"
+
+/-- `getFVarIsOp` agrees with `gctx.vars` classification, with `command_var`
+    names carved out as terms. -/
+private theorem getFVarIsOp_spec (st : TranslateState) (m : SourceRange) (i : Nat) :
+    match (getFVarIsOp m i).run st with
+    | .ok (b, st') =>
+        st' = st ∧
+        match st.gctx.vars[i]? with
+        | some (name, .expr _) => b = !st.globalVarTypes.contains name
+        | some (_,    .type _ _) => b = false
+        | none => False
+    | .error _ => st.gctx.vars[i]?.isNone := by
+  cases h : st.gctx.vars[i]? with
   | none =>
-    match st.gctx.vars[i]? with
-    | some (_, .expr _) => return true
-    | some (_, .type _ _) => return false
-    | none => throwAt m s!"Unknown free variable with index {i}"
+    simp [getFVarIsOp, throwAt, TranslateState.isGlobalVar, h]
+    exact True.intro
+  | some p =>
+    obtain ⟨name, k⟩ := p
+    cases k with
+    | expr _ =>
+      simp [getFVarIsOp, throwAt, TranslateState.isGlobalVar, h]
+      exact ⟨rfl, rfl⟩
+    | type _ _ =>
+      simp [getFVarIsOp, throwAt, TranslateState.isGlobalVar, h]
+      exact ⟨rfl, rfl⟩
 
 private def getBVarExpr (m : SourceRange) (i : Nat) : TranslateM Core.Expression.Expr := do
   let xs := (← get).bvars
@@ -181,6 +234,7 @@ private def typeRange : Boole.Type → SourceRange
   | .bv16 m => m
   | .bv32 m => m
   | .bv64 m => m
+  | .bv128 m => m
   | .Map m _ _ => m
   | .Sequence m _ => m
 
@@ -198,12 +252,20 @@ def toCoreMonoType (t : Boole.Type) : TranslateM Lambda.LMonoTy := do
   | .bv16 _ => return .bitvec 16
   | .bv32 _ => return .bitvec 32
   | .bv64 _ => return .bitvec 64
+  | .bv128 _ => return .bitvec 128
   | .Map _ v k => return .tcons "Map" [← toCoreMonoType k, ← toCoreMonoType v]
   | .Sequence _ elem => return .tcons "Sequence" [← toCoreMonoType elem]
   | _ => throwAt (typeRange t) s!"Unsupported Boole type: {repr t}"
 
 def toCoreType (t : Boole.Type) : TranslateM Core.Expression.Ty := do
   return .forAll [] (← toCoreMonoType t)
+
+private def isNatType (t : Boole.Type) : TranslateM Bool := do
+  match t with
+  | .fvar m i _ =>
+    let name ← getFVarName m i
+    return (← get).natSynonyms.contains name
+  | _ => return false
 
 private def toCoreBinding (b : BooleDDM.Binding SourceRange) : TranslateM (Core.Expression.Ident × Lambda.LMonoTy) := do
   match b with
@@ -238,7 +300,8 @@ private def bvWidth (m : SourceRange) (ty : Boole.Type) : TranslateM Nat :=
   | .bv8 _  => return 8
   | .bv16 _ => return 16
   | .bv32 _ => return 32
-  | .bv64 _ => return 64
+  | .bv64 _  => return 64
+  | .bv128 _ => return 128
   | _ => throwAt m s!"Expected bitvector type, got: {repr ty}"
 
 private def toCoreBvUn (m : SourceRange) (ty : Boole.Type) (op : String) (a : Core.Expression.Expr) : TranslateM Core.Expression.Expr := do
@@ -254,7 +317,10 @@ def toCoreTypedUn (m : SourceRange) (ty : Boole.Type) (op : String) (a : Core.Ex
   | .int _ =>
     let iop : Core.Expression.Expr := .op () ⟨s!"Int.{op}", ()⟩ none
     return .app () iop a
-  | _ => toCoreBvUn m ty op a
+  | _ =>
+    if ← isNatType ty then
+      return .app () (.op () ⟨s!"Int.{op}", ()⟩ none) a
+    else toCoreBvUn m ty op a
 
 -- Bitvector comparison operators use unsigned variants by default (Le→ULe, etc.).
 -- Signed variants use the explicit bvslt/bvsle nodes.
@@ -268,7 +334,10 @@ def toCoreTypedBin (m : SourceRange) (ty : Boole.Type) (op : String) (a b : Core
   | .int _ =>
     let iop : Core.Expression.Expr := .op () ⟨s!"Int.{op}", ()⟩ none
     return mkCoreApp iop [a, b]
-  | _ => toCoreBvBin m ty (toBvCmpOp op) a b
+  | _ =>
+    if ← isNatType ty then
+      return mkCoreApp (.op () ⟨s!"Int.{op}", ()⟩ none) [a, b]
+    else toCoreBvBin m ty (toBvCmpOp op) a b
 
 private def toCoreExtensionalEq
     (m : SourceRange)
@@ -438,6 +507,13 @@ partial def toCoreExpr (e : Boole.Expr) : TranslateM Core.Expression.Expr := do
       return tys.foldr (fun ty acc => .abs () "" (some ty) acc) body'
   -- Function application: `(f)(x)`  →  Core .app
   | .apply_expr _ _ _ f x => return .app () (← toCoreExpr f) (← toCoreExpr x)
+  | .cast_to_int m ty e =>
+    match ty with
+    | .bv1 _ | .bv8 _ | .bv16 _ | .bv32 _ | .bv64 _ | .bv128 _ => do
+      let n ← bvWidth m ty
+      return mkCoreApp (.op () (mkIdent s!"Bv{n}.ToNat") none) [← toCoreExpr e]
+    | .int _ => toCoreExpr e
+    | _ => throwAt m s!"'as int' requires a bitvector source type"
   | _ => throw (.fromMessage s!"Unsupported expression: {repr e}")
 
 end
@@ -762,6 +838,43 @@ private def toCoreDatatype
              constrs := constrs
              constrs_ne := by simp }
 
+-- For each constructor field whose Boole type is nat-like, emit an axiom:
+--   ∀ x : DatatypeName . DatatypeName..isCtor(x) ⟹ DatatypeName..field(x) ≥ 0
+-- Only generated for datatypes without type parameters (parameterised datatypes
+-- would require type-level quantification not currently supported here).
+private def natAxiomsForDatatype
+    (dtypeName : String)
+    (typeParams : List String)
+    (ctors : BooleDDM.ConstructorList SourceRange) : TranslateM (List Core.Decl) := do
+  if !typeParams.isEmpty then return []
+  let dtypeTy : Lambda.LMonoTy := .tcons dtypeName []
+  let bv0 : Core.Expression.Expr := .bvar () 0
+  let mut axioms : List Core.Decl := []
+  for ctor in constructorListToList ctors do
+    match ctor with
+    | .constructor_mk _ ⟨_, cname⟩ ⟨_, fields?⟩ =>
+      let fields : List (BooleDDM.Binding SourceRange) := match fields? with
+        | none => []
+        | some ⟨_, fs⟩ => fs.toList
+      let testerName := s!"{dtypeName}..is{cname}"
+      for field in fields do
+        match field with
+        | .mkBinding _ ⟨_, fieldName⟩ tp =>
+          match tp with
+          | .expr fieldTy =>
+            if ← isNatType fieldTy then
+              let selectorName := s!"{dtypeName}..{fieldName}"
+              let tester   := mkCoreApp (.op () ⟨testerName, ()⟩ none) [bv0]
+              let selector := mkCoreApp (.op () ⟨selectorName, ()⟩ none) [bv0]
+              let geZero   := mkCoreApp Core.intGeOp [selector, .intConst () 0]
+              let implies  := mkCoreApp Core.boolImpliesOp [tester, geZero]
+              let axExpr   : Core.Expression.Expr := .quant () .all "" (some dtypeTy) bv0 implies
+              let axName   := s!"{dtypeName}_{cname}_{fieldName}_nonneg"
+              axioms := axioms ++ [.ax { name := axName, e := axExpr } .empty]
+          | _ => pure ()
+        | _ => pure ()
+  return axioms
+
 private def toCoreDatatypeDecl (decl : BooleDDM.DatatypeDecl SourceRange) : TranslateM (Lambda.LDatatype Unit) := do
   match decl with
   | .datatype_decl m ⟨_, dtypeName⟩ ⟨_, typeParams?⟩ ctors =>
@@ -831,35 +944,6 @@ private def lowerPureFuncDef
       preconditions := pres
       measure := measure
     }
-
-/--
-Classify command-introduced free symbols:
-- constant/function declarations are treated as function symbols,
-- variable/type/datatype declarations are treated as term/type symbols.
--/
-private def registerCommandSymbols (cmd : BooleDDM.Command SourceRange) : List Bool :=
-  match cmd with
-  | .command_typedecl _ _ _ => [false]
-  | .command_typesynonym _ _ _ _ _ => [false]
-  | .command_constdecl _ _ _ _ => [true]
-  | .command_fndecl _ _ _ _ _ => [true]
-  | .command_fndef _ _ _ _ _ _ _ _ => [true]
-  | .command_recfndefs _ ⟨_, funcs⟩ => funcs.toList.map (fun _ => true)
-  | .command_var _ _ => [false]
-  -- Procedure names are referenced by call statements directly and are not Expr.fvar symbols.
-  | .boole_procedure _ _ _ _ _ _ _ _ | .command_procedure _ _ _ _ _ _ => []
-  | .command_datatypes _ ⟨_, decls⟩ => decls.toList.map (fun _ => false)
-  | .command_block _ _ => []
-  | .command_axiom _ _ _ => []
-  | .command_distinct _ _ _ => []
-
-/--
-Build the symbol-class table used by `getFVarIsOp`.
--/
-private def initFVarIsOp (p : Boole.Program) : Array Bool :=
-  match p with
-  | .prog _ ⟨_, cmds⟩ =>
-    (cmds.map registerCommandSymbols).toList.flatten.toArray
 
 private def collectModifiesFromSpec
     (fileName : String)
@@ -990,7 +1074,15 @@ def toCoreDecls (cmd : BooleDDM.Command SourceRange) : TranslateM (List Core.Dec
       body := ← toCoreBlock b
     } .empty]
   | .command_datatypes _ ⟨_, decls⟩ =>
-    return [.type (.data (← decls.toList.mapM toCoreDatatypeDecl)) .empty]
+    let datatypes ← decls.toList.mapM toCoreDatatypeDecl
+    let natAxioms ← decls.toList.mapM fun decl =>
+      match decl with
+      | .datatype_decl _ ⟨_, dtypeName⟩ ⟨_, typeParams?⟩ ctors =>
+        let typeParams := match typeParams? with
+          | none => []
+          | some bs => (bindingsToList bs).map bindingName
+        withTypeBVars typeParams (natAxiomsForDatatype dtypeName typeParams ctors)
+    return .type (.data datatypes) .empty :: natAxioms.flatten
 
 /-- Render a `Boole.Program` to a format object using the provided `GlobalContext` and
 `DialectMap`. These should come from the originating `Strata.Program` (i.e. `env.globalContext`
@@ -1010,16 +1102,16 @@ def formatProgram (prog : Boole.Program) (gctx : GlobalContext) (dialects : Dial
 def toCoreProgram (p : Boole.Program) (gctx : GlobalContext := {}) (fileName : String := "") : Except DiagnosticModel Core.Program := do
   match p with
   | .prog _ ⟨_, cmds⟩ =>
-    let fvarIsOp := initFVarIsOp p
-    -- Pre-pass: collect global variable types and modifies info per procedure.
+    -- Pre-pass: collect global variable types, modifies info, and nat synonyms.
     let mut varTypes : Std.HashMap String Lambda.LMonoTy := {}
     let mut modMap : Std.HashMap String (List (Core.Expression.Ident × Lambda.LMonoTy)) := {}
+    let mut natSynonyms : Std.HashSet String := {}
     for cmd in cmds do
       match cmd with
       | .command_var _ b =>
         match b with
         | .bind_mk _ ⟨_, n⟩ _ ty =>
-          match (toCoreMonoType ty).run' { gctx := gctx, fvarIsOp := fvarIsOp } with
+          match (toCoreMonoType ty).run' { gctx := gctx } with
           | .ok mty => varTypes := varTypes.insert n mty
           | .error _ => pure ()
       | .boole_procedure _ nameAnn _ _ _ _ specAnn _ =>
@@ -1028,13 +1120,18 @@ def toCoreProgram (p : Boole.Program) (gctx : GlobalContext := {}) (fileName : S
       | .command_procedure _ nameAnn _ _ specAnn _ =>
         let mods ← collectModifiesFromSpec fileName nameAnn.val specAnn.val varTypes
         if !mods.isEmpty then modMap := modMap.insert nameAnn.val mods
+      | .command_typesynonym _ ⟨_, n⟩ ⟨_, args?⟩ _ rhs =>
+        if args?.isNone then
+          match (toCoreMonoType rhs).run' { gctx := gctx } with
+          | .ok .int => natSynonyms := natSynonyms.insert n
+          | _ => pure ()
       | _ => pure ()
     let init : TranslateState := {
       fileName := fileName
       gctx := gctx
-      fvarIsOp := fvarIsOp
       modifiesMap := modMap
       globalVarTypes := varTypes
+      natSynonyms := natSynonyms
     }
     let act : TranslateM Core.Program := do
       let decls := (← cmds.mapM toCoreDecls).toList.flatten

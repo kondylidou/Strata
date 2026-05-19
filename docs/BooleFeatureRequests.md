@@ -8,9 +8,7 @@ This document tracks the selected Boole feature-request seeds kept under
 - Prioritize Rust-facing language support over Verus-only proof-visibility features.
 - Treat `opaque`, `reveal`, `hide`, `reveal_with_fuel`, `closed`, and `HasType`
   as lower-priority compatibility items unless they unblock a broader Rust path.
-- Keep widening casts/coercions active; prefer a centralized type-directed coercion
-  pass. This likely overlaps with `nat`/`int` boundary work given how Verus
-  internalizes fixed-width arithmetic.
+- Widening casts (`e as_int`) fully implemented (Gap #6) for bv1/8/16/32/64/128; covers all B2–B5 bitvector casts. Gap #8 (`nat` as a first-class type) is not a cast blocker — Boole has no `nat` type, so `nat`/`int` coercions are identity.
 
 ## Implemented feature requests
 
@@ -64,6 +62,9 @@ This document tracks the selected Boole feature-request seeds kept under
   - `fun x : T => body` lowers to nested Core `.abs` nodes; `(f)(x)` lowers to `.app () f x`.
   - Remaining gap: first-class function values as procedure parameters / local variables still need abstract-type encoding for the SMT path.
   - Benchmark: [`lambda_closure.lean`](../StrataTest/Languages/Boole/FeatureRequests/lambda_closure.lean).
+- **Widening casts** (`e as_int`)
+  - `e as_int` lowers to `Bv{n}.ToNat` (Core op) → SMT-LIB `bv2nat`; widths 1/8/16/32/64/128.
+  - Benchmarks: [`cast_expr.lean`](../StrataTest/Languages/Boole/FeatureRequests/cast_expr.lean), [`widening_casts.lean`](../StrataTest/Languages/Boole/FeatureRequests/widening_casts.lean).
 
 ## Semantic preservation requests
 
@@ -72,7 +73,7 @@ This document tracks the selected Boole feature-request seeds kept under
 3. **`reveal_with_fuel`**: Lower priority. Preserve the requested fuel amount instead of lowering it to an unrestricted reveal.
 4. **`closed` visibility**: Lower priority. Keep closed spec-function bodies hidden across module boundaries.
 5. **Overflow guards**: Lower priority. Preserve `HasType`-style arithmetic overflow checks if Verus-specific guards are worth modeling directly.
-6. **Widening casts outside call sites**: Insert or preserve cast/coercion structure in comparisons, quantifiers, and other expressions with a centralized type-directed coercion pass.
+6. **Widening casts**: Implemented.
 7. **`decreases` metadata**: Implemented.
 
 ## Type/model requests
