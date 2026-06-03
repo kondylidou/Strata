@@ -20,17 +20,18 @@ private def bfsCutOrPath : Strata.Program :=
 program Boole;
 
 // Graph G = (V, E): vertices 0..n-1, adjacency via uninterpreted function.
-function hasEdge(u: int, v: int) : bool;
+function AdjMatrix(u: int, v: int) : bool;
 
 type IntMap := Map int int;
 type BoolMap := Map int bool;
+type Walk := Sequence int;
 
 // p3: BFS_s(t)
 //
 // found = true  → p2: visited[t] witnesses that t is reachable from s
 // found = false → p1: visited is the cut set S with s ∈ S and t ∉ S
 procedure BFS(n: int, s: int, t: int)
-  returns (found: bool, parent: IntMap, visited: BoolMap)
+  returns (visited: BoolMap, path: Walk)
 spec {
   requires n > 0;
   requires 0 <= s && s < n;
@@ -38,8 +39,8 @@ spec {
   requires s != t;
 
   ensures visited[s]; // s is always in S
-  ensures found ==>  visited[t]; // p2: path found, t reached
-  ensures !found ==> !(visited[t]); // p1: no path, t ∉ S
+  ensures !(visited[t]) ==> IsACut(AdjMatrix, visited);
+  ensures visited[t] ==> IsPathValid(AdjMatrix,path);
 }
 {
   var queue : IntMap;
@@ -84,7 +85,7 @@ spec {
       invariant found ==> visited[t]
       invariant !found ==> !(visited[t])
     {
-      if (hasEdge(u, v) && !(visited[v])) {
+      if (AdjMatrix(u, v) && !(visited[v])) {
         visited[v] := true;
         parent[v]  := u;
         if (v == t) {
