@@ -205,6 +205,10 @@ structure VerifyOptions where
       to concurrent solver processes using `IO.asTask`. Each task spawns its
       own solver instance. Default 1 (sequential). -/
   parallelWorkers : Nat
+  /-- Pass `--mbqi-enum` to cvc5, enabling enumeration-based model-based
+      quantifier instantiation. Useful for quantified goals over finite
+      or bounded domains. Only has effect when solver is cvc5. -/
+  mbqiEnum : Bool := false
 
 def VerifyOptions.default : VerifyOptions := {
   verbose := .normal,
@@ -227,6 +231,7 @@ def VerifyOptions.default : VerifyOptions := {
   incremental := false
   pathCap := .none
   parallelWorkers := 1
+  mbqiEnum := false
 }
 
 instance : Inhabited VerifyOptions where

@@ -508,7 +508,10 @@ def getSolverFlags (options : VerifyOptions) : Array String :=
     | "cvc5" => #[s!"--tlimit={options.solverTimeout*1000}"]
     | "z3" => #[s!"-T:{options.solverTimeout}"]
     | _ => #[]
-  produceModels ++ setTimeout
+  let mbqiEnum :=
+    if options.mbqiEnum && options.solver == "cvc5" then #["--mbqi-enum"]
+    else #[]
+  produceModels ++ setTimeout ++ mbqiEnum
 
 def dischargeObligation
   (options : VerifyOptions)
