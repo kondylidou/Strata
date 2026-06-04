@@ -44,6 +44,7 @@ spec {
 }
 {
   var queue : IntMap;
+  var pos   : IntMap; // New: tracks the index of each node in the queue
   var head : int;
   var tail : int;
   var done : BoolMap;
@@ -64,39 +65,23 @@ spec {
   }
 
   head := 0;
+  pos[s] := 0;     // Record that 's' is at index 0
   queue[0] := s;
   tail := 1;
   visited[s] := true;
 
-  // assert queue[0] == s && head == 0 && tail == 1;
-  // assert ((head <= 0 && 0 < tail && queue[0] == s));
-
-
-  // assert (! (∀ x : int :: !(head <= x && x < tail) || queue[x] != s));
-
-  assert ((∃ x : int :: head <= x && x < tail && queue[x] == s));
-
-
-  //assert (∀ k: int :: 0 <= k && k < n ==> visited[k] ==> done[k] || k == t || (∃ x : int :: head <= x && x < tail && queue[x] == k));
-
+  assert queue[0] == s && head == 0 && tail == 1 && visited[s];
+  assert ((head <= 0 && 0 < tail && queue[0] == s));
+  assert ∀ k: int :: 0 <= k && k < n ==> visited[k] ==> done[k] || k == t || (head <= pos[k] && pos[k] < tail && queue[pos[k]] == k);
 
   while (head < tail && !(visited[t]))
     invariant 0 <= head && head <= tail
     invariant visited[s]
-
     invariant ∀ i: int :: head <= i && i < tail ==> (0 <= queue[i] && queue[i] < n)
     invariant ∀ i: int :: head <= i && i < tail ==> visited[queue[i]]
-
     invariant ∀ k: int :: 0 <= k && k < n ==> done[k] ==> visited[k]
-
-    // If a node is visited, it must be done, in the queue, OR it is the target 't'
-    invariant ∀ k: int :: 0 <= k && k < n ==> visited[k] ==> done[k] || k == t || (∃ x : int :: head <= x && x < tail && queue[x] == k)
-    // GUARDED closure: If we haven't found 't', all neighbors of done nodes are visited
+    invariant ∀ k: int :: 0 <= k && k < n ==> visited[k] ==> done[k] || k == t || (head <= pos[k] && pos[k] < tail && queue[pos[k]] == k)
     invariant !(visited[t]) ==> (∀ i:int, j:int :: 0 <= i && i < n && 0 <= j && j < n ==> (done[i] && Adj(i,j) ==> visited[j]))
-
-//    invariant !(visited[t]) ==> (∀ j: int :: 0 <= j && j < v ==> (Adj(u,j) ==> visited[j]))
-
-
   {
     u := queue[head];
     head := head + 1;
@@ -115,7 +100,7 @@ spec {
       invariant ∀ x: int :: head <= x && x < tail ==> 0 <= queue[x] && queue[x] < n
       invariant ∀ x: int :: head <= x && x < tail ==> visited[queue[x]]
 
-      invariant ∀ k: int :: 0 <= k && k < n ==> visited[k] ==> (done[k] || k == u || k == t || (∃ x : int :: head <= x && x < tail && queue[x] == k))
+      invariant ∀ k: int :: 0 <= k && k < n ==> visited[k] ==> (done[k] || k == u || k == t || (head <= pos[k] && pos[k] < tail && queue[pos[k]] == k))
       invariant !(visited[t]) ==> (∀ i:int, j:int :: 0 <= i && i < n && 0 <= j && j < n ==> (done[i] && Adj(i,j) ==> visited[j]))
       invariant !(visited[t]) ==> (∀ j: int :: 0 <= j && j < v ==> (Adj(u,j) ==> visited[j]))
       invariant ∀ k: int :: 0 <= k && k < n ==> (done[k]) ==> visited[k]
@@ -127,6 +112,7 @@ spec {
 
         } else {
           queue[tail] := v;
+          pos[v] := tail; // Record that 'v' is at index 'tail'
           tail := tail + 1;
         }
       }
@@ -139,9 +125,9 @@ spec {
 #end
 
 -- #eval Strata.Boole.verify "cvc5" bfsCutOrPath
---  (options := { Core.VerifyOptions.quiet with mbqiEnum := true, solverTimeout := 60 })
+--   (options := { Core.VerifyOptions.quiet with mbqiEnum := true, solverTimeout := 10 })
 
-#eval Strata.Boole.verify "cvc5" bfsCutOrPath (options := { Core.VerifyOptions.quiet with mbqiEnum := true })
+--#eval Strata.Boole.verify "cvc5" bfsCutOrPath (options := { Core.VerifyOptions.quiet with mbqiEnum := true })
 
 #eval Strata.Boole.verify "cvc5" bfsCutOrPath (options := .quiet)
 
