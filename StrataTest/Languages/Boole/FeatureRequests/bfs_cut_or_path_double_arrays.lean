@@ -45,7 +45,7 @@ spec {
 
   ensures visited[s]; // s is always in S
   ensures !(visited[t]) ==> (∀ i:int . ∀ j:int . 0 <= i && i < n && 0 <= j && j < n && visited[i] && !(visited[j]) ==> !(Adj(i,j)));
-  ensures visited[t] ==> 2 <= path_length && (∀ i:int . 0 <= i && i < path_length -1 && Adj(path[i],path[i+1]));
+  ensures visited[t] ==> 2 <= path_length && (∀ i:int . 0 <= i && i < path_length -1 ==> Adj(path[i],path[i+1]));
 }
 {
   var queue : IntMap;
@@ -220,7 +220,11 @@ spec {
 
 -- #eval Strata.Boole.verify "cvc5" bfsCutOrPath (options := { Core.VerifyOptions.quiet with mbqiEnum := true })
 
-#eval Strata.Boole.verify "cvc5" bfsCutOrPath (options := .quiet)
+#eval Strata.Boole.verify "cvc5" bfsCutOrPath
+  (options := { Core.VerifyOptions.quiet with
+    mbqiEnum := true,
+    mbqiEnumChoiceGrammar := false,
+    solverTimeout := 60 })
 
 set_option maxHeartbeats 800000 in
 example : Strata.smtVCsCorrect bfsCutOrPath := by

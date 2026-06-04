@@ -511,7 +511,10 @@ def getSolverFlags (options : VerifyOptions) : Array String :=
   let mbqiEnum :=
     if options.mbqiEnum && options.solver == "cvc5" then #["--mbqi-enum"]
     else #[]
-  produceModels ++ setTimeout ++ mbqiEnum
+  let mbqiEnumChoiceGrammar :=
+    if options.mbqiEnumChoiceGrammar && options.solver == "cvc5" then #["--mbqi-enum-choice-grammar"]
+    else #[]
+  produceModels ++ setTimeout ++ mbqiEnum ++ mbqiEnumChoiceGrammar
 
 def dischargeObligation
   (options : VerifyOptions)

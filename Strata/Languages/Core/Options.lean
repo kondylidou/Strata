@@ -209,6 +209,10 @@ structure VerifyOptions where
       quantifier instantiation. Useful for quantified goals over finite
       or bounded domains. Only has effect when solver is cvc5. -/
   mbqiEnum : Bool := false
+  /-- Pass `--mbqi-enum-choice-grammar` to cvc5, enabling grammar-guided
+      enumeration for MBQI. Refines the search space for existential
+      witnesses. Only has effect when solver is cvc5 and mbqiEnum is true. -/
+  mbqiEnumChoiceGrammar : Bool := false
 
 def VerifyOptions.default : VerifyOptions := {
   verbose := .normal,
