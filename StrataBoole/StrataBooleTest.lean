@@ -46,3 +46,4 @@ import StrataBooleTest.FeatureRequests.trait_spec_methods
 import StrataBooleTest.FeatureRequests.widening_casts
 import StrataBooleTest.FeatureRequests.b1_minimal
 import StrataBooleTest.FeatureRequests.b1_boundary_proved
+import StrataBooleTest.FeatureRequests.b2_minimal
