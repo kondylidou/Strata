@@ -50,6 +50,11 @@ Translation notes:
     (Verus already types the `Mul` impl's `mul` as returning `MontgomeryPoint`);
     the translator pairs each abstract trait-method decl with its impl and
     rewrites the projection at the single type-lowering chokepoint.
+  - The `&self * &s` operator call dispatches to the resolved impl `Impl__13_mul`
+    (Verus records the resolution in VLIR's `resolved_method = impl&%13::mul`;
+    the translator routes the call there rather than to the abstract trait
+    method `Ops_Arith_Mul_mul`), so the call site sees the impl's real Montgomery
+    `ensures` and `mul_clamped`'s correctness postcondition closes against it.
   - Verus spec-mode `+ − *` is mathematical `int`/`nat` (never wraps): the field
     and byte-decomposition specs emit `nat.add`/`nat.sub`/`nat.mul` (and `int`
     with `as_int` on bv leaves), not wrapping `bv`. `clamp_integer`'s
@@ -61,10 +66,12 @@ Trust boundary (3 `assume false` stubs + 1 uninterpreted spec fn):
     differential-addition correctness axioms). `requires`/`ensures` reproduced
     verbatim, body `assume(false)`, postcondition trusted as an axiom — far too
     heavy to reproduce at "reasonable scale", exactly the case the B5 spec flags.
-  - `Impl__13_mul` / `Ops_Arith_Mul_mul` — the `&MontgomeryPoint * &Scalar`
-    operator `mul_clamped` delegates to (whose real body reverses the scalar
-    into a big-endian bit slice and calls the ladder). Stubbed `assume(false)`,
-    exactly the callee-stubbing pattern B2 uses for `from_bytes_wide`/`pack`.
+  - `Impl__13_mul` — the `&MontgomeryPoint * &Scalar` operator `mul_clamped`
+    dispatches to (whose real body reverses the scalar into a big-endian bit
+    slice and calls the ladder). Stubbed `assume(false)`, but its `ensures` is
+    the real Montgomery postcondition, which `mul_clamped`'s proof consumes.
+    (The abstract trait global `Ops_Arith_Mul_mul` is still emitted but
+    unreferenced — the callee-stubbing pattern B2 uses for `from_bytes_wide`.)
   - `spec_mod_inverse` — left uninterpreted (`field_inv` names it, but no
     reachable proof constrains an inverse's value).
   The `clamp_integer` procedure is kept faithful and carries a real proof (a
@@ -73,30 +80,35 @@ Trust boundary (3 `assume false` stubs + 1 uninterpreted spec fn):
   `field_sqrt`, …) is reproduced verbatim and faithful, but *inert*: because the
   `*` operator is stubbed, the verifier never unfolds the curve arithmetic.
 
-Known gap (verification faithfulness, NOT type-check): the `&self * &s` call
-lowers to the *abstract* trait method `Ops_Arith_Mul_mul`, whose `ensures` is
-the vacuous `obeys_mul_spec ==> ret == mul_spec` (and `obeys_mul_spec()` is
-`false`). The *real* Montgomery postcondition lives on the resolved impl
-`Impl__13_mul` (`montgomery_point_as_nat(result) ==
-u_coordinate(montgomery_scalar_mul(…, scalar_as_nat(scalar)))`), which is
-declared but never called. So `mul_clamped`'s core correctness assert cannot yet
-close — this is the sole SMT encoding error (`Ops_Arith_Mul_mul_ensures_…`).
-Closing it means dispatching the operator call (and the trait spec-refs) to
-VLIR's `resolved_method = impl&%13::mul` instead of the abstract trait global;
-type-checking does not need it.
+Operator dispatch (resolved): the `&self * &s` call dispatches to the resolved
+impl `Impl__13_mul` (VLIR `resolved_method = impl&%13::mul`), so `mul_clamped`'s
+correctness postcondition `Impl__14_mul_clamped_ensures` now *verifies* — it
+closes against the impl's real Montgomery `ensures`
+(`montgomery_point_as_nat(result) == u_coordinate(montgomery_scalar_mul(…,
+scalar_as_nat(scalar)))`). Previously the call lowered to the *abstract*
+`Ops_Arith_Mul_mul`, whose `obeys_mul_spec ==> ret == mul_spec` ensures is
+vacuous (`obeys_mul_spec()` is `false`), and the postcondition could not close.
+The abstract operator procedure is still emitted but unreferenced; its own
+generic ensures VC is the lone encoding error below (an `Unimplemented encoding
+for type var` over `Self_`/`Rhs`), removable by pruning the orphaned global.
 
-Results: cvc5 discharges 241 of 329 VCs, 1 encoding error, 87 timeouts. The
-`clamp_integer` bit-vector proof and the byte/scalar bookkeeping pass; the lone
-encoding error is the operator-dispatch gap above; the 87 timeouts are the
-definition-level guard class shared with B1–B4 (the 32-term `u8_32_as_nat`
-`Sequence.select` bounds, the `nat.sub`/`nat.mod` guards in `p` /
-`field_canonical` / `field_sub` / `field_neg`, and their call-site echoes) plus
-the `mul_clamped` correctness assert that the dispatch gap leaves unprovable.
+Results (cvc5, 3s solver cap): 239 of 329 VCs pass, 89 timeouts, 1 encoding
+error. The headline is `Impl__14_mul_clamped_ensures` — the correctness
+postcondition — now passing (it could not close before the dispatch fix),
+alongside `clamp_integer`'s bit-vector proof and the byte/scalar bookkeeping.
+The lone encoding error is the orphaned abstract `Ops_Arith_Mul_mul`'s generic
+ensures (`Unimplemented encoding for type var`), no longer on the correctness
+path. The 89 timeouts are the definition-level guard class shared with B1–B4
+(the 32-term `u8_32_as_nat` `Sequence.select` bounds, the `nat.sub`/`nat.mod`
+guards in `p` / `field_canonical` / `field_sub` / `field_neg` and their
+call-site echoes, plus the new `Impl__13_mul` precondition check) — all
+cap-sensitive, not faithfulness gaps.
 
 Status: this file uses the `as_int` cast syntax from pr/casts-boole, the native
-`command_choosefndef` (#1365), and the `toCoreMonoType` type-argument-order fix.
-The un-merged branch has none of these, so the `#exit` below keeps the file
-inert until they land.
+`command_choosefndef` (#1365), the `toCoreMonoType` type-argument-order fix, and
+the `resolved_method` operator dispatch that routes the `*` call to
+`Impl__13_mul`. The un-merged branch has none of these, so the `#exit` below
+keeps the file inert until they land.
 -/
 
 #exit
@@ -385,7 +397,7 @@ spec {
   call clamped := clamp_integer(bytes);
   
   s := scalar_ctor(clamped);
-  call tmp1 := Ops_Arith_Mul_mul(self, s);
+  call tmp1 := Impl__13_mul(self, s);
   
   result := tmp1;
   assert clamped == spec_clamp_integer(bytes);
@@ -399,5 +411,5 @@ spec {
 };
 #end
 
--- cvc5 via Strata.Boole.verify: 241 of 329 VCs pass, 87 timeouts, 1 encoding error
+-- cvc5 via Strata.Boole.verify (3s cap): 239 of 329 VCs pass, 89 timeouts, 1 encoding error; mul_clamped postcondition verifies
 -- #eval Strata.Boole.verify "cvc5" b5_minimal_program (options := .quiet)
