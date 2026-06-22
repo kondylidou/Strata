@@ -56,9 +56,9 @@ Trust boundary (17 `assume false` stubs):
   The structural lemmas (limb-bound weakening, sum-of-limbs bound, constant
   limb bounds, 2^255 > 19) carry real proof bodies.
 
-Results: cvc5 discharges 519 of 791 VCs, 0 failures. The compress proof chain
+Results: cvc5 discharges 519 of 655 VCs, 0 failures. The compress proof chain
 — the spec-equality cascade, including the choose-defined `u8_32_from_nat` and
-the `by (bit_vector)` limb bounds — passes. The 272 timeouts are the
+the `by (bit_vector)` limb bounds — passes. The 136 timeouts are the
 definition-level guard class shared with B1–B3 (the 32-term `u8_32_as_nat`
 `Sequence.select` bounds, the let-expanded `nat_invsqrt` nat.sub/mod/div
 guards, `p`/`field_canonical` guards, and their call-site echoes), amplified
@@ -120,10 +120,6 @@ program Boole;
  function nat.ge (a : nat, b : nat) : bool {
   nat.toInt(a) >= nat.toInt(b)
 }
- function int_pow2 (e : int) : int;
- axiom [int_pow2_zero]: int_pow2(0) == 1;
- axiom [int_pow2_succ]: forall e : int :: 0 <= e ==> int_pow2(e + 1) == 2 * int_pow2(e);
- axiom [int_pow2_pos]: forall e : int :: 0 <= e ==> 1 <= int_pow2(e);
  datatype Tuple2 (T0 : Type, T1 : Type) {
   Tuple2_ctor_2(_0 : T0, _1 : T1)
 };
@@ -157,7 +153,7 @@ program Boole;
  function choice_is_true (c : choice) : bool;
  function is_on_edwards_curve_projective (x : nat, y : nat, z : nat) : bool;
  function sum_of_limbs_bounded (fe1 : fieldElement51, fe2 : fieldElement51, bound : bv64) : bool {
-  ∀ i : int :: 0 <= i && i < 5 ==> Sequence.select(fieldElement51..limbs(fe1), i) as_int + Sequence.select(fieldElement51..limbs(fe2), i) as_int < bound as_int
+  ∀ i : int :: 0 <= i && i < 5 ==> as_uint(Sequence.select(fieldElement51..limbs(fe1), i)) + as_uint(Sequence.select(fieldElement51..limbs(fe2), i)) < as_uint(bound)
 }
  function p () : nat {
   nat.sub(Arithmetic_Power2_pow2(nat.fromInt(255)), nat.fromInt(19))
@@ -166,7 +162,7 @@ program Boole;
   nat.mod(n, p)
 }
  function u64_5_as_nat (limbs : Sequence bv64) : nat {
-  nat.add(nat.add(nat.add(nat.add(nat.fromInt(Sequence.select(limbs, 0) as_int), nat.mul(Arithmetic_Power2_pow2(nat.fromInt(51)), nat.fromInt(Sequence.select(limbs, 1) as_int))), nat.mul(Arithmetic_Power2_pow2(nat.fromInt(102)), nat.fromInt(Sequence.select(limbs, 2) as_int))), nat.mul(Arithmetic_Power2_pow2(nat.fromInt(153)), nat.fromInt(Sequence.select(limbs, 3) as_int))), nat.mul(Arithmetic_Power2_pow2(nat.fromInt(204)), nat.fromInt(Sequence.select(limbs, 4) as_int)))
+  nat.add(nat.add(nat.add(nat.add(nat.fromInt(as_uint(Sequence.select(limbs, 0))), nat.mul(Arithmetic_Power2_pow2(nat.fromInt(51)), nat.fromInt(as_uint(Sequence.select(limbs, 1))))), nat.mul(Arithmetic_Power2_pow2(nat.fromInt(102)), nat.fromInt(as_uint(Sequence.select(limbs, 2))))), nat.mul(Arithmetic_Power2_pow2(nat.fromInt(153)), nat.fromInt(as_uint(Sequence.select(limbs, 3))))), nat.mul(Arithmetic_Power2_pow2(nat.fromInt(204)), nat.fromInt(as_uint(Sequence.select(limbs, 4)))))
 }
  function u64_5_as_field_canonical (limbs : Sequence bv64) : nat {
   field_canonical(u64_5_as_nat(limbs))
@@ -269,7 +265,7 @@ spec {
   assume false;
 };
  function u8_32_as_nat (bytes : Sequence bv8) : nat {
-  nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.mul(nat.fromInt(Sequence.select(bytes, 0) as_int), Arithmetic_Power2_pow2(nat.fromInt(0))), nat.mul(nat.fromInt(Sequence.select(bytes, 1) as_int), Arithmetic_Power2_pow2(nat.fromInt(8)))), nat.mul(nat.fromInt(Sequence.select(bytes, 2) as_int), Arithmetic_Power2_pow2(nat.fromInt(16)))), nat.mul(nat.fromInt(Sequence.select(bytes, 3) as_int), Arithmetic_Power2_pow2(nat.fromInt(24)))), nat.mul(nat.fromInt(Sequence.select(bytes, 4) as_int), Arithmetic_Power2_pow2(nat.fromInt(32)))), nat.mul(nat.fromInt(Sequence.select(bytes, 5) as_int), Arithmetic_Power2_pow2(nat.fromInt(40)))), nat.mul(nat.fromInt(Sequence.select(bytes, 6) as_int), Arithmetic_Power2_pow2(nat.fromInt(48)))), nat.mul(nat.fromInt(Sequence.select(bytes, 7) as_int), Arithmetic_Power2_pow2(nat.fromInt(56)))), nat.mul(nat.fromInt(Sequence.select(bytes, 8) as_int), Arithmetic_Power2_pow2(nat.fromInt(64)))), nat.mul(nat.fromInt(Sequence.select(bytes, 9) as_int), Arithmetic_Power2_pow2(nat.fromInt(72)))), nat.mul(nat.fromInt(Sequence.select(bytes, 10) as_int), Arithmetic_Power2_pow2(nat.fromInt(80)))), nat.mul(nat.fromInt(Sequence.select(bytes, 11) as_int), Arithmetic_Power2_pow2(nat.fromInt(88)))), nat.mul(nat.fromInt(Sequence.select(bytes, 12) as_int), Arithmetic_Power2_pow2(nat.fromInt(96)))), nat.mul(nat.fromInt(Sequence.select(bytes, 13) as_int), Arithmetic_Power2_pow2(nat.fromInt(104)))), nat.mul(nat.fromInt(Sequence.select(bytes, 14) as_int), Arithmetic_Power2_pow2(nat.fromInt(112)))), nat.mul(nat.fromInt(Sequence.select(bytes, 15) as_int), Arithmetic_Power2_pow2(nat.fromInt(120)))), nat.mul(nat.fromInt(Sequence.select(bytes, 16) as_int), Arithmetic_Power2_pow2(nat.fromInt(128)))), nat.mul(nat.fromInt(Sequence.select(bytes, 17) as_int), Arithmetic_Power2_pow2(nat.fromInt(136)))), nat.mul(nat.fromInt(Sequence.select(bytes, 18) as_int), Arithmetic_Power2_pow2(nat.fromInt(144)))), nat.mul(nat.fromInt(Sequence.select(bytes, 19) as_int), Arithmetic_Power2_pow2(nat.fromInt(152)))), nat.mul(nat.fromInt(Sequence.select(bytes, 20) as_int), Arithmetic_Power2_pow2(nat.fromInt(160)))), nat.mul(nat.fromInt(Sequence.select(bytes, 21) as_int), Arithmetic_Power2_pow2(nat.fromInt(168)))), nat.mul(nat.fromInt(Sequence.select(bytes, 22) as_int), Arithmetic_Power2_pow2(nat.fromInt(176)))), nat.mul(nat.fromInt(Sequence.select(bytes, 23) as_int), Arithmetic_Power2_pow2(nat.fromInt(184)))), nat.mul(nat.fromInt(Sequence.select(bytes, 24) as_int), Arithmetic_Power2_pow2(nat.fromInt(192)))), nat.mul(nat.fromInt(Sequence.select(bytes, 25) as_int), Arithmetic_Power2_pow2(nat.fromInt(200)))), nat.mul(nat.fromInt(Sequence.select(bytes, 26) as_int), Arithmetic_Power2_pow2(nat.fromInt(208)))), nat.mul(nat.fromInt(Sequence.select(bytes, 27) as_int), Arithmetic_Power2_pow2(nat.fromInt(216)))), nat.mul(nat.fromInt(Sequence.select(bytes, 28) as_int), Arithmetic_Power2_pow2(nat.fromInt(224)))), nat.mul(nat.fromInt(Sequence.select(bytes, 29) as_int), Arithmetic_Power2_pow2(nat.fromInt(232)))), nat.mul(nat.fromInt(Sequence.select(bytes, 30) as_int), Arithmetic_Power2_pow2(nat.fromInt(240)))), nat.mul(nat.fromInt(Sequence.select(bytes, 31) as_int), Arithmetic_Power2_pow2(nat.fromInt(248))))
+  nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 0))), Arithmetic_Power2_pow2(nat.fromInt(0))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 1))), Arithmetic_Power2_pow2(nat.fromInt(8)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 2))), Arithmetic_Power2_pow2(nat.fromInt(16)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 3))), Arithmetic_Power2_pow2(nat.fromInt(24)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 4))), Arithmetic_Power2_pow2(nat.fromInt(32)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 5))), Arithmetic_Power2_pow2(nat.fromInt(40)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 6))), Arithmetic_Power2_pow2(nat.fromInt(48)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 7))), Arithmetic_Power2_pow2(nat.fromInt(56)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 8))), Arithmetic_Power2_pow2(nat.fromInt(64)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 9))), Arithmetic_Power2_pow2(nat.fromInt(72)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 10))), Arithmetic_Power2_pow2(nat.fromInt(80)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 11))), Arithmetic_Power2_pow2(nat.fromInt(88)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 12))), Arithmetic_Power2_pow2(nat.fromInt(96)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 13))), Arithmetic_Power2_pow2(nat.fromInt(104)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 14))), Arithmetic_Power2_pow2(nat.fromInt(112)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 15))), Arithmetic_Power2_pow2(nat.fromInt(120)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 16))), Arithmetic_Power2_pow2(nat.fromInt(128)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 17))), Arithmetic_Power2_pow2(nat.fromInt(136)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 18))), Arithmetic_Power2_pow2(nat.fromInt(144)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 19))), Arithmetic_Power2_pow2(nat.fromInt(152)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 20))), Arithmetic_Power2_pow2(nat.fromInt(160)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 21))), Arithmetic_Power2_pow2(nat.fromInt(168)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 22))), Arithmetic_Power2_pow2(nat.fromInt(176)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 23))), Arithmetic_Power2_pow2(nat.fromInt(184)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 24))), Arithmetic_Power2_pow2(nat.fromInt(192)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 25))), Arithmetic_Power2_pow2(nat.fromInt(200)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 26))), Arithmetic_Power2_pow2(nat.fromInt(208)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 27))), Arithmetic_Power2_pow2(nat.fromInt(216)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 28))), Arithmetic_Power2_pow2(nat.fromInt(224)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 29))), Arithmetic_Power2_pow2(nat.fromInt(232)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 30))), Arithmetic_Power2_pow2(nat.fromInt(240)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 31))), Arithmetic_Power2_pow2(nat.fromInt(248))))
 }
  procedure Impl__13_as_bytes (self : fieldElement51) returns (r : (Sequence bv8))
 spec {
@@ -493,7 +489,7 @@ spec {
   verus_tmp_ren3 := fe51_as_canonical_nat(edwardsPoint..T(ristrettoPoint.._0(self)));
   verus_tmp_t_nat := verus_tmp_ren3;
   t_nat := verus_tmp_t_nat;
-  call lemma_sum_of_limbs_bounded_from_fe51_bounded(edwardsPoint..Z(ristrettoPoint.._0(self)), edwardsPoint..Y(ristrettoPoint.._0(self)), 52 as_bv64);
+  call lemma_sum_of_limbs_bounded_from_fe51_bounded(edwardsPoint..Z(ristrettoPoint.._0(self)), edwardsPoint..Y(ristrettoPoint.._0(self)), as_bv64(52));
   assert sum_of_limbs_bounded(edwardsPoint..Z(ristrettoPoint.._0(self)), edwardsPoint..Y(ristrettoPoint.._0(self)), bv{64}(18446744073709551615));
   assume sum_of_limbs_bounded(edwardsPoint..Z(ristrettoPoint.._0(self)), edwardsPoint..Y(ristrettoPoint.._0(self)), bv{64}(18446744073709551615));
   call lemma_sqrt_m1_limbs_bounded();
@@ -506,17 +502,17 @@ spec {
   Y := edwardsPoint..Y(ristrettoPoint.._0(self));
   Z := edwardsPoint..Z(ristrettoPoint.._0(self));
   T := edwardsPoint..T(ristrettoPoint.._0(self));
-  call lemma_fe51_limbs_bounded_weaken(Z, 52 as_bv64, 54 as_bv64);
-  call lemma_fe51_limbs_bounded_weaken(Y, 52 as_bv64, 54 as_bv64);
-  call lemma_fe51_limbs_bounded_weaken(X, 52 as_bv64, 54 as_bv64);
-  call lemma_fe51_limbs_bounded_weaken(T, 52 as_bv64, 54 as_bv64);
+  call lemma_fe51_limbs_bounded_weaken(Z, as_bv64(52), as_bv64(54));
+  call lemma_fe51_limbs_bounded_weaken(Y, as_bv64(52), as_bv64(54));
+  call lemma_fe51_limbs_bounded_weaken(X, as_bv64(52), as_bv64(54));
+  call lemma_fe51_limbs_bounded_weaken(T, as_bv64(52), as_bv64(54));
   assert fe51_limbs_bounded(Z, bv{64}(54)) && fe51_limbs_bounded(Y, bv{64}(54)) && fe51_limbs_bounded(X, bv{64}(54)) && fe51_limbs_bounded(T, bv{64}(54));
   assume fe51_limbs_bounded(Z, bv{64}(54)) && fe51_limbs_bounded(Y, bv{64}(54)) && fe51_limbs_bounded(X, bv{64}(54)) && fe51_limbs_bounded(T, bv{64}(54));
   call z_plus_y := Impl__13_fe_add(Z, Y);
   
   call z_minus_y := Impl__13_fe_sub(Z, Y);
   
-  call lemma_fe51_limbs_bounded_weaken(z_plus_y, 53 as_bv64, 54 as_bv64);
+  call lemma_fe51_limbs_bounded_weaken(z_plus_y, as_bv64(53), as_bv64(54));
   assert fe51_limbs_bounded(z_plus_y, bv{64}(54));
   assume fe51_limbs_bounded(z_plus_y, bv{64}(54));
   call u1 := Impl__13_fe_mul(z_plus_y, z_minus_y);
@@ -562,7 +558,7 @@ spec {
   call lemma_invsqrt_matches_spec(invsqrt_nat, u1_u2_sq_nat);
   assert nat.toInt(invsqrt_nat) == nat.toInt(nat_invsqrt(u1_u2_sq_nat));
   assume nat.toInt(invsqrt_nat) == nat.toInt(nat_invsqrt(u1_u2_sq_nat));
-  call lemma_fe51_limbs_bounded_weaken(invsqrt, 52 as_bv64, 54 as_bv64);
+  call lemma_fe51_limbs_bounded_weaken(invsqrt, as_bv64(52), as_bv64(54));
   assert fe51_limbs_bounded(invsqrt, bv{64}(54));
   assume fe51_limbs_bounded(invsqrt, bv{64}(54));
   call i1 := Impl__13_fe_mul(invsqrt, u1);
@@ -649,7 +645,7 @@ spec {
   
   assert choice_is_true(x_z_inv_neg) == is_negative(field_mul(x_rot, z_inv_nat));
   assume choice_is_true(x_z_inv_neg) == is_negative(field_mul(x_rot, z_inv_nat));
-  call lemma_fe51_limbs_bounded_weaken(Y, 52 as_bv64, 54 as_bv64);
+  call lemma_fe51_limbs_bounded_weaken(Y, as_bv64(52), as_bv64(54));
   assert fe51_limbs_bounded(Y, bv{64}(54));
   assume fe51_limbs_bounded(Y, bv{64}(54));
   call Y := conditional_negate_field_element(Y, x_z_inv_neg);
@@ -659,7 +655,7 @@ spec {
   y_final := verus_tmp_y_final;
   assert nat.toInt(y_final) == if is_negative(field_mul(x_rot, z_inv_nat)) then nat.toInt(field_neg(y_rot)) else nat.toInt(y_rot);
   assume nat.toInt(y_final) == if is_negative(field_mul(x_rot, z_inv_nat)) then nat.toInt(field_neg(y_rot)) else nat.toInt(y_rot);
-  call lemma_fe51_limbs_bounded_weaken(den_inv, 52 as_bv64, 54 as_bv64);
+  call lemma_fe51_limbs_bounded_weaken(den_inv, as_bv64(52), as_bv64(54));
   assert fe51_limbs_bounded(den_inv, bv{64}(54));
   assume fe51_limbs_bounded(den_inv, bv{64}(54));
   call z_minus_y_final := Impl__13_fe_sub(Z, Y);
@@ -677,7 +673,7 @@ spec {
   
   assert choice_is_true(s_is_negative) == is_negative(s_pre_nat);
   assume choice_is_true(s_is_negative) == is_negative(s_pre_nat);
-  call lemma_fe51_limbs_bounded_weaken(s, 52 as_bv64, 54 as_bv64);
+  call lemma_fe51_limbs_bounded_weaken(s, as_bv64(52), as_bv64(54));
   assert fe51_limbs_bounded(s, bv{64}(54));
   assume fe51_limbs_bounded(s, bv{64}(54));
   call s := conditional_negate_field_element(s, s_is_negative);
@@ -847,9 +843,9 @@ spec {
   assert Sequence.select(fieldElement51..limbs(b), i) < bv{64}(1) << n;
   assume Sequence.select(fieldElement51..limbs(b), i) < bv{64}(1) << n;
   assert n <= bv{64}(62);
-  assert [bitvector_query]: n <= bv{64}(62) ==> (bv{64}(1) << n) as_int + (bv{64}(1) << n) as_int < 18446744073709551615;
-  assert Sequence.select(fieldElement51..limbs(a), i) as_int + Sequence.select(fieldElement51..limbs(b), i) as_int < 18446744073709551615;
-  assume ∀ i : int :: 0 <= i && i < 5 ==> Sequence.select(fieldElement51..limbs(a), i) as_int + Sequence.select(fieldElement51..limbs(b), i) as_int < 18446744073709551615;
+  assert [bitvector_query]: n <= bv{64}(62) ==> as_uint(bv{64}(1) << n) + as_uint(bv{64}(1) << n) < 18446744073709551615;
+  assert as_uint(Sequence.select(fieldElement51..limbs(a), i)) + as_uint(Sequence.select(fieldElement51..limbs(b), i)) < 18446744073709551615;
+  assume ∀ i : int :: 0 <= i && i < 5 ==> as_uint(Sequence.select(fieldElement51..limbs(a), i)) + as_uint(Sequence.select(fieldElement51..limbs(b), i)) < 18446744073709551615;
   exit lemma_sum_of_limbs_bounded_from_fe51_bounded;
 };
  procedure lemma_sqrt_m1_limbs_bounded () returns ()
@@ -928,5 +924,8 @@ spec {
 };
 #end
 
--- cvc5 via Strata.Boole.verify: 519 of 791 VCs pass, 272 timeouts, 0 failures
+-- The inline `#eval` is Lean-compilation-bound on this large program and does
+-- not reach cvc5 within a practical timeout; the figure below is from a
+-- dedicated run (cvc5 invoked directly on the exported VCs).
+-- cvc5 via Strata.Boole.verify: 519 of 655 VCs pass, 136 timeouts, 0 failures
 -- #eval Strata.Boole.verify "cvc5" b4_minimal_program (options := .quiet)

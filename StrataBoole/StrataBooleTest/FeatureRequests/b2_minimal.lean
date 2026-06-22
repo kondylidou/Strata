@@ -38,7 +38,7 @@ Trust boundary:
     procedure GUARDED by `canonical(result) == bytes_as_nat(input) mod group_order`,
     so it cannot conclude uniformity for an incorrect result.
 
-Verification: cvc5 leaves 2 timeout VCs; the Lean backend
+Verification: cvc5 leaves 39 timeout VCs; the Lean backend
 `gen_smt_vcs_boole; all_goals (try grind)` discharges all VCs (~30s).
 -/
 
@@ -72,6 +72,10 @@ program Boole;
    {
   nat.fromInt(nat.toInt(a) div nat.toInt(b))
 }
+ function nat.mod (a : nat, b : nat) : nat requires nat.toInt(b) != 0;
+   {
+  nat.fromInt(nat.toInt(a) mod nat.toInt(b))
+}
  function nat.lt (a : nat, b : nat) : bool {
   nat.toInt(a) < nat.toInt(b)
 }
@@ -84,12 +88,10 @@ program Boole;
  function nat.ge (a : nat, b : nat) : bool {
   nat.toInt(a) >= nat.toInt(b)
 }
- function bv8_to_nat_u (x : bv8) : nat;
- function bv64_to_nat_u (x : bv64) : nat;
  const Seq_map_empty_0:Sequence nat;
  axiom Sequence.length(Seq_map_empty_0) == 0;
  function Seq_map_closure_0 (_i : int, x : bv64) : nat {
-  bv64_to_nat_u(x)
+  nat.fromInt(as_uint(x))
 }
  rec function Seq_map_rec_0 (s : Sequence bv64, n : int) : Sequence nat requires 0 <= n && n <= Sequence.length(s);
 
@@ -103,11 +105,21 @@ decreases n
  // sequence). The former global length axioms would be unsound on the synonym, so the
  // length invariant is carried by the constructor preconditions instead.
  type scalar52 := Sequence bv64;
- function scalar52_ctor (limbs : Sequence bv64) : scalar52 requires Sequence.length(limbs) == 5; { limbs }
- function scalar52_limbs (limbs : Sequence bv64) : Sequence bv64 { limbs }
+ function scalar52_ctor (limbs : Sequence bv64) : Sequence bv64 requires Sequence.length(limbs) == 5;
+   {
+  limbs
+}
+ function scalar52..limbs (limbs : Sequence bv64) : Sequence bv64 {
+  limbs
+}
  type scalar := Sequence bv8;
- function scalar_ctor (bytes : Sequence bv8) : scalar requires Sequence.length(bytes) == 32; { bytes }
- function scalar_bytes (bytes : Sequence bv8) : Sequence bv8 { bytes }
+ function scalar_ctor (bytes : Sequence bv8) : Sequence bv8 requires Sequence.length(bytes) == 32;
+   {
+  bytes
+}
+ function scalar..bytes (bytes : Sequence bv8) : Sequence bv8 {
+  bytes
+}
  function Array_spec_array_as_slice<T> (ar : Sequence T) : Sequence T;
  function Arithmetic_Power2_pow2 (e : nat) : nat;
  function is_uniform_bytes (bytes : Sequence bv8) : bool;
@@ -115,16 +127,16 @@ decreases n
  rec function bytes_seq_as_nat (bytes : Sequence bv8) : nat
 decreases Sequence.length(bytes)
   {
-  if Sequence.length(bytes) == 0 then nat.fromInt(0) else nat.add(bv8_to_nat_u(Sequence.select(bytes, 0)), nat.mul(Arithmetic_Power2_pow2(nat.fromInt(8)), bytes_seq_as_nat(Sequence.subrange(bytes, 1, Sequence.length(bytes)))))
+  if Sequence.length(bytes) == 0 then nat.fromInt(0) else nat.add(nat.fromInt(as_uint(Sequence.select(bytes, 0))), nat.mul(Arithmetic_Power2_pow2(nat.fromInt(8)), bytes_seq_as_nat(Sequence.subrange(bytes, 1, Sequence.length(bytes)))))
 };
  function u8_32_as_nat (bytes : Sequence bv8) : nat {
-  nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.mul(bv8_to_nat_u(Sequence.select(bytes, 0)), Arithmetic_Power2_pow2(nat.fromInt(0))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 1)), Arithmetic_Power2_pow2(nat.fromInt(8)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 2)), Arithmetic_Power2_pow2(nat.fromInt(16)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 3)), Arithmetic_Power2_pow2(nat.fromInt(24)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 4)), Arithmetic_Power2_pow2(nat.fromInt(32)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 5)), Arithmetic_Power2_pow2(nat.fromInt(40)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 6)), Arithmetic_Power2_pow2(nat.fromInt(48)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 7)), Arithmetic_Power2_pow2(nat.fromInt(56)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 8)), Arithmetic_Power2_pow2(nat.fromInt(64)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 9)), Arithmetic_Power2_pow2(nat.fromInt(72)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 10)), Arithmetic_Power2_pow2(nat.fromInt(80)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 11)), Arithmetic_Power2_pow2(nat.fromInt(88)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 12)), Arithmetic_Power2_pow2(nat.fromInt(96)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 13)), Arithmetic_Power2_pow2(nat.fromInt(104)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 14)), Arithmetic_Power2_pow2(nat.fromInt(112)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 15)), Arithmetic_Power2_pow2(nat.fromInt(120)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 16)), Arithmetic_Power2_pow2(nat.fromInt(128)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 17)), Arithmetic_Power2_pow2(nat.fromInt(136)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 18)), Arithmetic_Power2_pow2(nat.fromInt(144)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 19)), Arithmetic_Power2_pow2(nat.fromInt(152)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 20)), Arithmetic_Power2_pow2(nat.fromInt(160)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 21)), Arithmetic_Power2_pow2(nat.fromInt(168)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 22)), Arithmetic_Power2_pow2(nat.fromInt(176)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 23)), Arithmetic_Power2_pow2(nat.fromInt(184)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 24)), Arithmetic_Power2_pow2(nat.fromInt(192)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 25)), Arithmetic_Power2_pow2(nat.fromInt(200)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 26)), Arithmetic_Power2_pow2(nat.fromInt(208)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 27)), Arithmetic_Power2_pow2(nat.fromInt(216)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 28)), Arithmetic_Power2_pow2(nat.fromInt(224)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 29)), Arithmetic_Power2_pow2(nat.fromInt(232)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 30)), Arithmetic_Power2_pow2(nat.fromInt(240)))), nat.mul(bv8_to_nat_u(Sequence.select(bytes, 31)), Arithmetic_Power2_pow2(nat.fromInt(248))))
+  nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.add(nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 0))), Arithmetic_Power2_pow2(nat.fromInt(0))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 1))), Arithmetic_Power2_pow2(nat.fromInt(8)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 2))), Arithmetic_Power2_pow2(nat.fromInt(16)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 3))), Arithmetic_Power2_pow2(nat.fromInt(24)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 4))), Arithmetic_Power2_pow2(nat.fromInt(32)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 5))), Arithmetic_Power2_pow2(nat.fromInt(40)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 6))), Arithmetic_Power2_pow2(nat.fromInt(48)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 7))), Arithmetic_Power2_pow2(nat.fromInt(56)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 8))), Arithmetic_Power2_pow2(nat.fromInt(64)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 9))), Arithmetic_Power2_pow2(nat.fromInt(72)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 10))), Arithmetic_Power2_pow2(nat.fromInt(80)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 11))), Arithmetic_Power2_pow2(nat.fromInt(88)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 12))), Arithmetic_Power2_pow2(nat.fromInt(96)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 13))), Arithmetic_Power2_pow2(nat.fromInt(104)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 14))), Arithmetic_Power2_pow2(nat.fromInt(112)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 15))), Arithmetic_Power2_pow2(nat.fromInt(120)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 16))), Arithmetic_Power2_pow2(nat.fromInt(128)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 17))), Arithmetic_Power2_pow2(nat.fromInt(136)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 18))), Arithmetic_Power2_pow2(nat.fromInt(144)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 19))), Arithmetic_Power2_pow2(nat.fromInt(152)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 20))), Arithmetic_Power2_pow2(nat.fromInt(160)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 21))), Arithmetic_Power2_pow2(nat.fromInt(168)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 22))), Arithmetic_Power2_pow2(nat.fromInt(176)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 23))), Arithmetic_Power2_pow2(nat.fromInt(184)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 24))), Arithmetic_Power2_pow2(nat.fromInt(192)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 25))), Arithmetic_Power2_pow2(nat.fromInt(200)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 26))), Arithmetic_Power2_pow2(nat.fromInt(208)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 27))), Arithmetic_Power2_pow2(nat.fromInt(216)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 28))), Arithmetic_Power2_pow2(nat.fromInt(224)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 29))), Arithmetic_Power2_pow2(nat.fromInt(232)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 30))), Arithmetic_Power2_pow2(nat.fromInt(240)))), nat.mul(nat.fromInt(as_uint(Sequence.select(bytes, 31))), Arithmetic_Power2_pow2(nat.fromInt(248))))
 }
  function group_order () : nat {
   nat.add(Arithmetic_Power2_pow2(nat.fromInt(252)), nat.fromInt(27742317777372353535851937790883648493))
 }
  function group_canonical (n : nat) : nat {
-  nat.fromInt(nat.toInt(n) mod nat.toInt(group_order))
+  nat.mod(n, group_order)
 }
  rec function seq_as_nat_52 (limbs : Sequence nat) : nat
 decreases Sequence.length(limbs)
@@ -135,19 +147,19 @@ decreases Sequence.length(limbs)
   seq_as_nat_52(Seq_map_rec_0(limbs, Sequence.length(limbs)))
 }
  function scalar52_as_nat (s : scalar52) : nat {
-  limbs52_as_nat(Array_spec_array_as_slice(scalar52_limbs(s)))
+  limbs52_as_nat(Array_spec_array_as_slice(scalar52..limbs(s)))
 }
  function limbs_bounded (s : scalar52) : bool {
-  ∀ i : int :: 0 <= i && i < 5 ==> Sequence.select(scalar52_limbs(s), i) < bv{64}(1) << bv{64}(52)
+  ∀ i : int :: 0 <= i && i < 5 ==> Sequence.select(scalar52..limbs(s), i) < bv{64}(1) << bv{64}(52)
 }
  function is_canonical_scalar52 (s : scalar52) : bool {
   limbs_bounded(s) && nat.lt(scalar52_as_nat(s), group_order)
 }
  function is_canonical_scalar (s : scalar) : bool {
-  nat.lt(u8_32_as_nat(scalar_bytes(s)), group_order) && Sequence.select(scalar_bytes(s), 31) <= bv{8}(127)
+  nat.lt(u8_32_as_nat(scalar..bytes(s)), group_order) && Sequence.select(scalar..bytes(s), 31) <= bv{8}(127)
 }
  function scalar_as_canonical (s : scalar) : nat {
-  group_canonical(u8_32_as_nat(scalar_bytes(s)))
+  group_canonical(u8_32_as_nat(scalar..bytes(s)))
 }
  procedure Impl__2_clone (self : scalar52) returns (_pct_return : scalar52)
 spec {
@@ -169,7 +181,7 @@ spec {
  procedure Impl__3_pack (self : scalar52) returns (result : scalar)
 spec {
   requires limbs_bounded(self);
-  ensures nat.toInt(u8_32_as_nat(scalar_bytes(result))) == nat.toInt(scalar52_as_nat(self)) mod nat.toInt(Arithmetic_Power2_pow2(nat.fromInt(256)));
+  ensures nat.toInt(u8_32_as_nat(scalar..bytes(result))) == nat.toInt(nat.mod(scalar52_as_nat(self), Arithmetic_Power2_pow2(nat.fromInt(256))));
   ensures nat.lt(scalar52_as_nat(self), group_order) ==> is_canonical_scalar(result);
   } {
   assume false;
@@ -202,7 +214,7 @@ spec {
   tmp3 := bytes_seq_as_nat(input);
   tmp4 := group_order;
   call Arithmetic_Div_mod_lemma_mod_bound(nat.toInt(tmp3), nat.toInt(tmp4));
-  tmp5 := u8_32_as_nat(scalar_bytes(result));
+  tmp5 := u8_32_as_nat(scalar..bytes(result));
   tmp6 := group_order;
   call Arithmetic_Div_mod_lemma_small_mod(tmp5, tmp6);
   call axiom_uniform_mod_reduction(input, result);
@@ -213,7 +225,7 @@ spec {
 spec {
   requires nat.lt(x, m);
   requires nat.lt(nat.fromInt(0), m);
-  ensures nat.toInt(x) mod nat.toInt(m) == nat.toInt(x);
+  ensures nat.toInt(nat.mod(x, m)) == nat.toInt(x);
   } {
   assume false;
 };
@@ -323,9 +335,12 @@ spec {
   assume nat.toInt(Arithmetic_Power2_pow2(nat.fromInt(63))) == 9223372036854775808;
   call Arithmetic_Power2_lemma_pow2_adds(nat.fromInt(63), nat.fromInt(63));
   assert nat.toInt(Arithmetic_Power2_pow2(nat.fromInt(126))) == 85070591730234615865843651857942052864;
+  assume nat.toInt(Arithmetic_Power2_pow2(nat.fromInt(126))) == 85070591730234615865843651857942052864;
   assert nat.lt(nat.fromInt(27742317777372353535851937790883648493), Arithmetic_Power2_pow2(nat.fromInt(126)));
+  assume nat.lt(nat.fromInt(27742317777372353535851937790883648493), Arithmetic_Power2_pow2(nat.fromInt(126)));
   call Arithmetic_Power2_lemma_pow2_strictly_increases(nat.fromInt(126), nat.fromInt(252));
   assert nat.lt(group_order, nat.add(Arithmetic_Power2_pow2(nat.fromInt(252)), Arithmetic_Power2_pow2(nat.fromInt(252))));
+  assume nat.lt(group_order, nat.add(Arithmetic_Power2_pow2(nat.fromInt(252)), Arithmetic_Power2_pow2(nat.fromInt(252))));
   call Arithmetic_Power2_lemma_pow2_adds(nat.fromInt(1), nat.fromInt(252));
   call Arithmetic_Power2_lemma2_to64();
   assert nat.toInt(Arithmetic_Power2_pow2(nat.fromInt(252))) + nat.toInt(Arithmetic_Power2_pow2(nat.fromInt(252))) == nat.toInt(Arithmetic_Power2_pow2(nat.fromInt(253)));
@@ -353,7 +368,7 @@ spec {
 };
  procedure axiom_uniform_mod_reduction (input : Sequence bv8, result : scalar) returns ()
 spec {
-  requires nat.toInt(scalar_as_canonical(result)) == nat.toInt(bytes_seq_as_nat(input)) mod nat.toInt(group_order);
+  requires nat.toInt(scalar_as_canonical(result)) == nat.toInt(nat.mod(bytes_seq_as_nat(input), group_order));
   ensures is_uniform_bytes(input) ==> is_uniform_scalar(result);
   } {
   assume false;
@@ -361,7 +376,7 @@ spec {
 };
 #end
 
--- cvc5 via Strata.Boole.verify: 2 timeout VCs
+-- cvc5 via Strata.Boole.verify: 39 timeout VCs
 -- #eval Strata.Boole.verify "cvc5" b2_minimal_program (options := .quiet)
 
 -- Lean backend: gen_smt_vcs_boole; grind discharges all VCs (~30s).

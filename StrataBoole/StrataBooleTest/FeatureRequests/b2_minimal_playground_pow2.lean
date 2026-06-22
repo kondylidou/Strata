@@ -31,11 +31,11 @@ the uniform-reduction lemma are stated as global axioms. The
 uniform-reduction axiom keeps the same guard as in `b2_minimal.lean`
 (`canonical(result) == bytes_as_nat(input) mod group_order`).
 
-Results: cvc5 reports 9 timeout VCs (2 for `b2_minimal.lean`); grind closes
-16 of 25 goals. The quantified axioms make the queries harder, not easier,
-so the closing theorem below is left commented.
+Results: cvc5 reports 2 timeout VCs (`b2_minimal.lean`, the bv128 variant,
+leaves 39); grind closes 16 of 25 goals. The quantified axioms make grind's
+queries harder, so the closing theorem below is left commented.
 
-Status: this file uses the `as_int` cast syntax from pr/casts-boole, which
+Status: this file uses the `as_uint` cast syntax from pr/casts-boole, which
 this branch does not have yet; the `#exit` below keeps it inert until then.
 -/
 
@@ -137,12 +137,12 @@ decreases n
  rec function bytes_seq_as_nat (bytes : Sequence bv8) : nat
 decreases Sequence.length(bytes)
   {
-  if Sequence.length(bytes) == 0 then nat.fromInt(0) else nat.fromInt(Sequence.select(bytes, 0) as_int + nat.toInt(Arithmetic_Power2_pow2(nat.fromInt(8))) * nat.toInt(bytes_seq_as_nat(Sequence.subrange(bytes, 1, Sequence.length(bytes)))))
+  if Sequence.length(bytes) == 0 then nat.fromInt(0) else nat.fromInt(as_uint(Sequence.select(bytes, 0)) + nat.toInt(Arithmetic_Power2_pow2(nat.fromInt(8))) * nat.toInt(bytes_seq_as_nat(Sequence.subrange(bytes, 1, Sequence.length(bytes)))))
 };
  rec function u8_32_as_nat (bytes : Sequence bv8) : nat
 decreases Sequence.length(bytes)
   {
-  if Sequence.length(bytes) == 0 then nat.fromInt(0) else nat.add(nat.fromInt((Sequence.select(bytes, 0) as_int)), nat.mul(Arithmetic_Power2_pow2(nat.fromInt(8)), u8_32_as_nat(Sequence.subrange(bytes, 1, Sequence.length(bytes)))))
+  if Sequence.length(bytes) == 0 then nat.fromInt(0) else nat.add(nat.fromInt(as_uint(Sequence.select(bytes, 0))), nat.mul(Arithmetic_Power2_pow2(nat.fromInt(8)), u8_32_as_nat(Sequence.subrange(bytes, 1, Sequence.length(bytes)))))
 };
  function group_order () : nat {
   nat.add(Arithmetic_Power2_pow2(nat.fromInt(252)), nat.fromInt(27742317777372353535851937790883648493))
@@ -342,7 +342,7 @@ spec {
   (is_uniform_bytes(input) ==> is_uniform_scalar(result));
 #end
 
--- cvc5 via Strata.Boole.verify: 9 timeout VCs
+-- cvc5 via Strata.Boole.verify: 2 timeout VCs
 -- #eval Strata.Boole.verify "cvc5" b2_minimal_playground_pow2_program (options := .quiet)
 
 -- Lean backend: gen_smt_vcs_boole; grind closes 16 of 25 goals

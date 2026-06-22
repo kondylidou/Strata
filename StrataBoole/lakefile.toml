@@ -12,3 +12,8 @@ name = "StrataBoole"
 
 [[lean_lib]]
 name = "StrataBooleTest"
+# The native-bv128 Dalek seeds (b1_minimal, b1_boundary_proved) compile each
+# `#strata` command to a deeply nested term; Lean's LCNF compiler overflows the
+# default ~8 MB worker stack while building them. Raise the thread stack (KB).
+# Unnecessary on Lean >= v4.30.0, whose default thread stack is 1 GB.
+weakLeanArgs = ["-s", "32768"]
