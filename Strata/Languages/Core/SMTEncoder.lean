@@ -675,9 +675,15 @@ partial def toSMTOp (E : Env) (fn : CoreIdent) (fnty : LMonoTy) (ctx : SMT.Conte
               match func.body with
               | none => .ok (ctx.addUF uf, !ctx.ufs.contains uf)
               | some body =>
+                -- If already registered, this is a recursive self-call inside the
+                -- body we're currently encoding. Return (ctx, false) so the call
+                -- site emits a plain UF application (the define-fun-rec refers
+                -- to itself by name).
+                if ctx.ufs.contains uf then .ok (ctx, false)
+                else
                 let bvars := (List.range formals.length).map (fun i => LExpr.bvar () i)
                 let body := LExpr.substFvarsLifting body (formals.zip bvars)
-                -- Register UF first so recursive self-calls in the body resolve.
+                -- Register UF first so recursive self-calls hit the guard above.
                 let ctx := ctx.addUF uf
                 let (term, ctx) ← toSMTTerm E bvs body ctx useArrayTheory
                 .ok (ctx.addRF uf term, !ctx.rfs.any (fun rf => rf.uf == uf))
