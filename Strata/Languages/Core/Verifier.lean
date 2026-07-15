@@ -1121,6 +1121,8 @@ def SMT.Result.merge (a b : SMT.Result) : SMT.Result :=
   | _, .err e => .err e
   | .sat m, _ => .sat m
   | _, .sat m => .sat m
+  | .unknown (some m), .unknown _ => .unknown (some m)
+  | .unknown _,        .unknown (some m) => .unknown (some m)
   | .unknown m, _ => .unknown m
   | _, .unknown m => .unknown m
   | .unsat, .unsat => .unsat
@@ -1607,11 +1609,16 @@ def getObligationResult (assumptionTerms : List Term) (obligationTerm : Term)
       validityProperty := adjVal,
       solverLog := #[smtLog] }
     let outcome := maskOutcome rawOutcome satisfiabilityCheck validityCheck
-    -- Extract model from sat results (using raw solver results)
+    -- Extract model from sat or unknown-with-candidate results.
+    -- unknown (some m) arises when the solver returns a candidate model it cannot
+    -- certify (e.g. cvc5 with quantified bridge axioms). Phases may promote it
+    -- to sat; we still want the model available for display.
     let model := match satResult, validityResult with
-      | .sat m, _ => convertModel m (SMT.Context.getConstructorNames ctx)
-      | _, .sat m => convertModel m (SMT.Context.getConstructorNames ctx)
-      | _, _ => []
+      | .sat m, _             => convertModel m (SMT.Context.getConstructorNames ctx)
+      | _, .sat m             => convertModel m (SMT.Context.getConstructorNames ctx)
+      | .unknown (some m), _ => convertModel m (SMT.Context.getConstructorNames ctx)
+      | _, .unknown (some m) => convertModel m (SMT.Context.getConstructorNames ctx)
+      | _, _                  => []
     -- Filter out managed variables from model display
     let managedVarNames := (varDefinitions.map (·.name)) ++ (varDeclarations.map (·.name))
     let model := model.filter fun (name, _) => !managedVarNames.contains name.name
