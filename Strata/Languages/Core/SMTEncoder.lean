@@ -37,11 +37,7 @@ structure SMT.Context where
   sorts : Array SMT.Sort := #[]
   ufs : Array UF := #[]
   ifs : Array SMT.IF := #[]
-  rfs : Array SMT.IF := #[]
   axms : Array Term := #[]
-  /-- When true, emit recursive ADT functions as `define-fun-rec` instead of
-      UF + per-constructor axioms. Set from `VerifyOptions.useDefFunRec`. -/
-  useDefFunRec : Bool := false
   tySubst: Map String TermType := []
   /-- Stores the TypeFactory purely for ordering datatype declarations
   correctly (TypeFactory in topological order) -/
@@ -69,11 +65,6 @@ def SMT.Context.addIF (ctx : SMT.Context) (fn : UF) (body : Term) : SMT.Context 
   let smtif := { uf := fn, body := body }
   if smtif ∈ ctx.ifs then ctx else
   { ctx with ifs := ctx.ifs.push smtif }
-
-def SMT.Context.addRF (ctx : SMT.Context) (fn : UF) (body : Term) : SMT.Context :=
-  let smtrf := { uf := fn, body := body }
-  if smtrf ∈ ctx.rfs then ctx else
-  { ctx with rfs := ctx.rfs.push smtrf }
 
 def SMT.Context.addAxiom (ctx : SMT.Context) (axm : Term) : SMT.Context :=
   if axm ∈ ctx.axms then ctx else
@@ -669,25 +660,7 @@ partial def toSMTOp (E : Env) (fn : CoreIdent) (fnty : LMonoTy) (ctx : SMT.Conte
                     Consider marking the function as `inline`."
         else
           let (ctx, isNew) ←
-            if func.isRecursive && ctx.useDefFunRec then
-              -- Emit as define-fun-rec: compute the body term so Verifier can
-              -- emit define-fun-rec rather than declare-fun + axioms.
-              match func.body with
-              | none => .ok (ctx.addUF uf, !ctx.ufs.contains uf)
-              | some body =>
-                -- If already registered, this is a recursive self-call inside the
-                -- body we're currently encoding. Return (ctx, false) so the call
-                -- site emits a plain UF application (the define-fun-rec refers
-                -- to itself by name).
-                if ctx.ufs.contains uf then .ok (ctx, false)
-                else
-                let bvars := (List.range formals.length).map (fun i => LExpr.bvar () i)
-                let body := LExpr.substFvarsLifting body (formals.zip bvars)
-                -- Register UF first so recursive self-calls hit the guard above.
-                let ctx := ctx.addUF uf
-                let (term, ctx) ← toSMTTerm E bvs body ctx useArrayTheory
-                .ok (ctx.addRF uf term, !ctx.rfs.any (fun rf => rf.uf == uf))
-            else if func.isRecursive then
+            if func.isRecursive then
               .ok (ctx.addUF uf, !ctx.ufs.contains uf)
             else match func.body with
             | none => .ok (ctx.addUF uf, !ctx.ufs.contains uf)
@@ -699,9 +672,7 @@ partial def toSMTOp (E : Env) (fn : CoreIdent) (fnty : LMonoTy) (ctx : SMT.Conte
               let (term, ctx) ← toSMTTerm E bvs body ctx useArrayTheory
               .ok (ctx.addIF uf term,  !ctx.ifs.contains ({ uf := uf, body := term }))
           -- For recursive functions with @[cases], generate per-constructor axioms.
-          -- Skipped when useDefFunRec: the define-fun-rec body is self-contained.
           let recAxioms ← if func.isRecursive && isNew &&
-              !ctx.useDefFunRec &&
               (Strata.DL.Util.FuncAttr.findInlineIfConstr func.attr).isSome then
               Lambda.genRecursiveAxioms func ctx.typeFactory E.exprEval ()
             else .ok []

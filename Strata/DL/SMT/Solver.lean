@@ -277,22 +277,6 @@ def defineFunTerm (id : String) (args : List (String × TermType)) (retTy : Term
   let bodyStr ← termToSMTString body
   defineFun id args retTy bodyStr
 
-/-- Define a recursive function (emits `define-fun-rec`). Body as pre-rendered string. -/
-def defineFunRec (id : String) (args : List (String × TermType)) (retTy : TermType)
-    (body : String) : SolverM Unit := do
-  let typedArgs ← args.mapM fun (name, ty) => do
-    let tyStr ← typeToSMTString ty
-    return s!"({quoteIdent name} {tyStr})"
-  let inline := String.intercalate " " typedArgs
-  let retStr ← typeToSMTString retTy
-  emitln s!"(define-fun-rec {quoteIdent id} ({inline}) {retStr} {body})"
-
-/-- Define a recursive function where the body is given as a `Term`. -/
-def defineFunRecTerm (id : String) (args : List (String × TermType)) (retTy : TermType)
-    (body : Term) : SolverM Unit := do
-  let bodyStr ← termToSMTString body
-  defineFunRec id args retTy bodyStr
-
 /-! ## Solver control -/
 
 private def readlnD (dflt : String) : SolverM String := do

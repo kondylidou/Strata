@@ -138,9 +138,6 @@ structure AbstractSolver (τ : Type) (σ : Type) (m : Type → Type) [Monad m] [
   /-- Define an interpreted function with a body term. -/
   defineFun : String → List (String × σ) → σ → τ → m Unit
 
-  /-- Define a recursive function (emits `define-fun-rec`). -/
-  defineFunRec : String → List (String × σ) → σ → τ → m Unit
-
   /-- Declare a new sort with the given arity. Returns the declared sort. -/
   declareSort : String → Nat → m σ
 

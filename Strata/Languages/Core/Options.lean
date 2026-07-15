@@ -161,11 +161,6 @@ structure VerifyOptions where
   uniqueBoundNames : Bool
   /-- Use SMT-LIB Array theory instead of axiomatized maps. -/
   useArrayTheory : Bool
-  /-- Emit recursive functions over algebraic datatypes as `define-fun-rec` instead
-      of uninterpreted functions with per-constructor axioms. This allows cvc5 to
-      evaluate them on constructor terms during model search, enabling concrete
-      counterexamples for constrained queries (e.g. `nat.toInt(n) = 73`). -/
-  useDefFunRec : Bool
   -- Verification behavior
   /-- Exit after the first verification error instead of
       continuing. -/
@@ -219,7 +214,6 @@ def VerifyOptions.default : VerifyOptions := {
   stopOnFirstError := false,
   removeIrrelevantAxioms := .Off,
   useArrayTheory := false,
-  useDefFunRec := false,
   solverTimeout := 10,
   outputSarif := false,
   solver := defaultSolver

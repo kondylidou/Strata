@@ -243,24 +243,6 @@ def encodeFunction (solver : AbstractSolver τ σ m) (uf : UF) (body : Term) : A
   liftM (solver.defineFun id argPairs outSort bodyEnc)
   modifyGet fun state => (id, { state with base.ufs := state.base.ufs.insert uf id })
 
--- Like encodeFunction but emits `define-fun-rec`. Pre-registers the UF in
--- encoder state before encoding the body so recursive self-calls resolve
--- to the same id without triggering a spurious `declare-fun`.
-def encodeRecFunction (solver : AbstractSolver τ σ m) (uf : UF) (body : Term) : AbstractEncoderM τ m String := do
-  if let .some enc := (← get).base.ufs.get? uf then return enc
-  let id ← uniquify (sanitizeSmtName uf.id)
-  modify fun state => { state with
-    base.ufs := state.base.ufs.insert uf id
-    base.usedNames := state.base.usedNames.insert id }
-  liftM (solver.comment uf.id)
-  let argPairs ← uf.args.mapM fun vt => do
-    let s ← liftM (termTypeToSort solver vt.ty)
-    return (vt.id, s)
-  let outSort ← liftM (termTypeToSort solver uf.out)
-  let bodyEnc ← encodeTerm solver body
-  liftM (solver.defineFunRec id argPairs outSort bodyEnc)
-  return id
-
 end AbstractEncoder
 
 /-- Build constructor declarations for a datatype, converting field types
@@ -331,11 +313,9 @@ def encodeDeclarationsAbstract [Monad m] [MonadExceptOf IO.Error m]
   let varDefNames := varDefinitions.map (·.name)
   let varDeclNames := varDeclarations.map (·.name)
   let managedNames := varDefNames ++ varDeclNames
-  -- Filter out managed variables and define-fun-rec functions from UF declarations.
-  let rfIds : Std.HashSet String := ctx.rfs.foldl (fun s rf => s.insert rf.uf.id) {}
-  let ufsToDecl := (if managedNames.isEmpty then ctx.ufs
-    else ctx.ufs.filter fun uf => !managedNames.contains uf.id)
-    |>.filter fun uf => !rfIds.contains uf.id
+  -- Filter out managed variables from UF declarations (they will be emitted separately)
+  let ufsToDecl := if managedNames.isEmpty then ctx.ufs
+    else ctx.ufs.filter fun uf => !managedNames.contains uf.id
   let (_ufs, estate) ← ufsToDecl.mapM (fun uf => AbstractEncoder.encodeUF solver uf) |>.run initState
   -- Pre-populate encoder state with managed variable names so encodeTerm
   -- recognizes them without emitting declareFun
@@ -346,8 +326,6 @@ def encodeDeclarationsAbstract [Monad m] [MonadExceptOf IO.Error m]
         { estate with base := { estate.base with
           ufs := estate.base.ufs.insert uf uf.id
           usedNames := estate.base.usedNames.insert uf.id } }
-  -- Emit recursive function definitions (define-fun-rec) before IFs and axioms.
-  let (_rfs, estate) ← ctx.rfs.mapM (fun fn => AbstractEncoder.encodeRecFunction solver fn.uf fn.body) |>.run estate
   let (_ifs, estate) ← ctx.ifs.mapM (fun fn => AbstractEncoder.encodeFunction solver fn.uf fn.body) |>.run estate
   let (_axms, estate) ← ctx.axms.mapM (fun ax => AbstractEncoder.encodeTerm solver ax) |>.run estate
   for id in _axms do
@@ -398,11 +376,8 @@ def encodeCore (ctx : Core.SMT.Context) (prelude : SolverM Unit)
   let preDeclaredNames := ctx.preDeclaredNames
 
   let estate ← phase "encodeUFs" do
-    -- Skip UFs that will be emitted as define-fun-rec.
-    let rfIds : Std.HashSet String := ctx.rfs.foldl (fun s rf => s.insert rf.uf.id) {}
-    let ufsToDecl := (if managedNames.isEmpty then ctx.ufs
-      else ctx.ufs.filter fun uf => !managedNames.contains uf.id)
-      |>.filter fun uf => !rfIds.contains uf.id
+    let ufsToDecl := if managedNames.isEmpty then ctx.ufs
+      else ctx.ufs.filter fun uf => !managedNames.contains uf.id
     let (_ufs, estate) ← ufsToDecl.mapM (fun uf => encodeUF uf) |>.run (EncoderState.initWithNames preDeclaredNames)
     pure estate
 
@@ -414,7 +389,6 @@ def encodeCore (ctx : Core.SMT.Context) (prelude : SolverM Unit)
           { estate with
             ufs := estate.ufs.insert uf uf.id
             usedNames := estate.usedNames.insert uf.id }
-    let (_rfs, estate) ← ctx.rfs.mapM (fun fn => Encoder.encodeRecFunction fn.uf fn.body) |>.run estate
     let (_ifs, estate) ← ctx.ifs.mapM (fun fn => encodeFunction fn.uf fn.body) |>.run estate
     pure estate
 
@@ -1787,8 +1761,7 @@ def verifySingleEnv (oblProgram : Program)
     let needValCheck := validityCheck && peValResult?.isNone
     let maybeTerms ← pctx.withRepeatedPhase "smtEncode" do
       let smtCtx := { SMT.Context.default with
-        uniqueBoundNames := options.uniqueBoundNames
-        useDefFunRec := options.useDefFunRec }
+        uniqueBoundNames := options.uniqueBoundNames }
       pure (ProofObligation.toSMTTerms E obligation smtCtx options.useArrayTheory)
     match maybeTerms with
     | .error err =>
