@@ -1951,11 +1951,7 @@ def verify (program : Program)
   if oblProgNoAxioms.decls.length == oblProgram.decls.length then
     let _ ← IO.println s!"[Strata] requeryDropAxioms: none of {requeryDropAxioms} matched any axiom declaration — re-query skipped" |>.toBaseIO
     return merged
-  -- Re-query uses define-fun-rec so cvc5 can evaluate recursive functions on
-  -- constructor terms. Bridge axioms are already dropped, so there is no conflict
-  -- with universally quantified formulas referencing define-fun-rec functions.
-  let reQueryOptions := { options with useDefFunRec := true }
-  let requerySolver := mkDefaultCoreSMTSolver reQueryOptions counter tempDir axiomCache?
+  let requerySolver := mkDefaultCoreSMTSolver options counter tempDir axiomCache?
     axiomNames (axiomProgram := program) externalPhases phases
     (mkDischarge := mkDischarge) pctx
   let (reQueryVCs, _) ← pctx.withPhase "requeryVcDischarge" do
