@@ -1948,21 +1948,21 @@ def verify (program : Program)
   -- can return a certified sat (counterexample) unimpeded by the universals.
   if requeryDropAxioms.isEmpty || !merged.any (·.hasValidityUnknown) then
     return merged
-  let oblProgNoAxioms := { oblProgram with
-    decls := oblProgram.decls.filter fun d =>
-      match d.getAxiom? with
-      | some ax => !requeryDropAxioms.contains ax.name
-      | none    => true }
-  -- Warn if none of the named axioms were found; the re-query would be identical
-  -- to the primary pass (wasted work) and unknown results would remain unchanged.
-  if oblProgNoAxioms.decls.length == oblProgram.decls.length then
+  -- Bridge axioms live in `program` (the original input); `oblProgram` already
+  -- excludes them because `toCoreProofObligationProgram` only keeps .type decls,
+  -- eval-derived functions, distinct constraints, and obligation procedures.
+  -- Check existence against `program.decls` so mis-spelled names still warn.
+  let programAxiomNames := program.decls.filterMap fun d => d.getAxiom?.map (·.name)
+  let matchedAxioms := requeryDropAxioms.filter (programAxiomNames.contains ·)
+  if matchedAxioms.isEmpty then
     let _ ← IO.println s!"[Strata] requeryDropAxioms: none of {requeryDropAxioms} matched any axiom declaration — re-query skipped" |>.toBaseIO
     return merged
+  -- `oblProgram` already has no bridge axioms, so pass it directly.
   let requerySolver := mkDefaultCoreSMTSolver options counter tempDir axiomCache?
     axiomNames (axiomProgram := program) externalPhases phases
     (mkDischarge := mkDischarge) pctx
   let (reQueryVCs, _) ← pctx.withPhase "requeryVcDischarge" do
-    requerySolver moreFns oblProgNoAxioms
+    requerySolver moreFns oblProgram
   let reQueryMerged := reQueryVCs.mergeByAssertion
   -- Build an index for O(n) lookup instead of O(n²) linear scan per unknown.
   let reQueryIndex : Std.HashMap String VCResult :=
