@@ -300,6 +300,19 @@ def encodeFunction (uf : UF) (body : Term) : EncoderM String := do
   modifyGet λ state => (id, {state with
     ufs := state.ufs.insert uf id})
 
+-- Like encodeFunction but emits `define-fun-rec`. Pre-registers the UF in
+-- state before encoding the body so recursive self-calls resolve without
+-- triggering a spurious `declare-fun`.
+def encodeRecFunction (uf : UF) (body : Term) : EncoderM String := do
+  if let (.some enc) := (← get).ufs.get? uf then return enc
+  let id ← uniquify (sanitizeSmtName uf.id)
+  modify fun state => { state with ufs := state.ufs.insert uf id }
+  comment uf.id
+  let argPairs := uf.args.map (fun vt => (vt.id, vt.ty))
+  let bodyEnc ← encodeTerm body
+  Solver.defineFunRecTerm id argPairs uf.out bodyEnc
+  return id
+
 /-- A utility for debugging. -/
 def termToString (e : Term) : IO String := do
   let b ← IO.mkRef { : IO.FS.Stream.Buffer }
