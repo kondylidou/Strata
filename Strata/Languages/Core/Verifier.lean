@@ -1930,12 +1930,28 @@ def verify (program : Program)
   if matchedAxioms.isEmpty then
     let _ ← IO.println s!"[Strata] requeryDropAxioms: none of {requeryDropAxioms} matched any axiom declaration — re-query skipped" |>.toBaseIO
     return merged
-  -- `oblProgram` already has no bridge axioms, so pass it directly.
+  -- Bridge axioms were baked into `oblProgram`'s procedure bodies as `assume`
+  -- statements by `toCoreProofObligationProgram`. Strip those assumes so the
+  -- re-query SMT problem is axiom-free and cvc5 can certify a counterexample.
+  let oblProgramNoAxioms : Program :=
+    { oblProgram with
+      decls := oblProgram.decls.map fun d =>
+        match d with
+        | .proc p md =>
+          let newBody := match p.body with
+            | .structured ss =>
+              .structured (ss.filter fun s =>
+                match s with
+                | .cmd (.cmd (.assume label _ _)) => !matchedAxioms.contains label
+                | _ => true)
+            | other => other
+          .proc { p with body := newBody } md
+        | other => other }
   let requerySolver := mkDefaultCoreSMTSolver options counter tempDir axiomCache?
     axiomNames (axiomProgram := program) externalPhases phases
     (mkDischarge := mkDischarge) pctx
   let (reQueryVCs, _) ← pctx.withPhase "requeryVcDischarge" do
-    requerySolver moreFns oblProgram
+    requerySolver moreFns oblProgramNoAxioms
   let reQueryMerged := reQueryVCs.mergeByAssertion
   -- Build an index for O(n) lookup instead of O(n²) linear scan per unknown.
   let reQueryIndex : Std.HashMap String VCResult :=
