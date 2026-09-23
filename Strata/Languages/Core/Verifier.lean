@@ -1481,7 +1481,7 @@ def preprocessObligation (obligation : ProofObligation Expression) (p : Program)
                   | .varDecl _ _ (.det e) => (Lambda.LExpr.getOps e).map opName
                   | .varDecl _ _ .nondet => []
                   | .distinct _ exprs => exprs.flatMap (fun e => (Lambda.LExpr.getOps e).map opName))
-            (consequentFns ++ antecedentFns).dedup
+            (consequentFns ++ antecedentFns).uniq
           | .Off => consequentFns  -- unreachable; handled above
         let irrelevantAxioms :=
           IrrelevantAxioms.getIrrelevantAxioms (axiomProgram.getD p) cache relevantFns
@@ -1993,6 +1993,9 @@ def verifySingleEnv (oblProgram : Program)
     else pure none
   let mut emState := emStateInit
   for obligation in obligations do
+    -- `obligationsToVerify`: obligations not listed are skipped entirely.
+    if let some labels := options.obligationsToVerify then
+      if !labels.contains obligation.label then continue
     -- Determine which checks to perform based on metadata or check mode/amount
     let (satisfiabilityCheck, validityCheck) :=
       if Imperative.MetaData.hasFullCheck obligation.metadata then
