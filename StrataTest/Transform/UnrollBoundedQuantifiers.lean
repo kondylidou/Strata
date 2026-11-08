@@ -2410,13 +2410,13 @@ procedure P ()
       assert [assume_e0_calls_Sequence.select_0]: int.lt(0, Sequence.length(s));
     } else {
       assume [ls]: Sequence.length(s) == 2;
-      assume [e0]: Sequence.select(s, 0) == 5;
+      assume [e0]: Sequence.select!(s, 0) == 5;
       assert [assert_a_calls_Sequence.select_0]: (int.lt(0, Sequence.length(s)) ==> int.lt(0, Sequence.length(s))) && (int.lt(1, Sequence.length(s)) ==> int.lt(1, Sequence.length(s)));
     }
   } else {
     assume [ls]: Sequence.length(s) == 2;
-    assume [e0]: Sequence.select(s, 0) == 5;
-    assert [a]: int.lt(1, Sequence.length(s)) ==> int.le(0, Sequence.select(s, 1));
+    assume [e0]: Sequence.select!(s, 0) == 5;
+    assert [a]: int.lt(1, Sequence.length(s)) ==> int.le(0, Sequence.select!(s, 1));
   }
 };
 -/
@@ -2490,7 +2490,7 @@ procedure P ()
     assert [assume_i0_calls_Sequence.select_0]: int.lt(0, Sequence.length(idx));
   } else {
     assume [li]: Sequence.length(idx) == 1;
-    assume [i0]: Sequence.select(idx, 0) == 2;
+    assume [i0]: Sequence.select!(idx, 0) == 2;
     assert [a]: int.le(0, Sequence.select!(s, 0)) && int.le(0, Sequence.select!(s, 1));
   }
 };
