@@ -1074,8 +1074,9 @@ private partial def bindIFsChain (ufs : List UF) (ifs : List IF) (lhs : Lean.Exp
 /-- Close the sort context: eliminate uninterpreted-sort binders one at a time.
 Proves `bindUSs ... = some ft'`. -/
 private partial def bindUSsChain (lhs : Lean.Expr) : MetaM SomeEqProof := do
-  -- lhs = bindUSs uss iss ft
-  let #[uss, iss, ft] := lhs.getAppArgs | throwError "proveQuery: unexpected bindUSs"
+  -- lhs = bindUSs uss iss (dts := []) ft; the datatype list is implicit, and empty in
+  -- every query this tactic proves today
+  let #[uss, iss, _dts, ft] := lhs.getAppArgs | throwError "proveQuery: unexpected bindUSs"
   match_expr ← whnfR uss with
   | List.nil _ => return { rhs := ft, proof := mkAppN (lem `bindUSs_nil) #[iss, ft] }
   | List.cons _ us uss' =>
