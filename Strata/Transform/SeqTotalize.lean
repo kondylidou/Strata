@@ -74,11 +74,12 @@ end Core.SeqTotalize
 def Core.seqTotalizePipelinePhase : Core.PipelinePhase :=
   Core.modelPreservingPipelinePhase "seqTotalize"
     (requires := factSet![.noCFGBodies, .noPrecondsFromFuncs])
-    (preserves := factSet![.noCFGBodies, .noCalls, .noLoops, .noLoopInvariants,
-                         .noLoopMeasures, .staticSingleAssignment, .noBetaRedexes,
-                         .noPrecondsFromFuncs, .noNondetGuards, .hasObligationForm,
-                         .noProcedureContracts, .noPolymorphicProcedures,
-                         .noPolymorphicFunctions, .typeAnnotated])
+    (preserves := factSet![.wellFormedCalls, .noCFGBodies, .noCalls, .noLoops,
+                         .noLoopInvariants, .noLoopMeasures, .uniqueInits, .loopBodyNoInits,
+                         .staticSingleAssignment, .noBetaRedexes, .noPrecondsFromFuncs,
+                         .noNondetGuards, .hasObligationForm, .noProcedureContracts,
+                         .noPolymorphicProcedures, .noPolymorphicFunctions, .typeAnnotated,
+                         .noInits, .treeForm, .exitsCovered, .armsHaveObligations])
     fun prog => do
       return (true, Core.SeqTotalize.totalizeProgram prog)
 
