@@ -165,7 +165,7 @@ def renderStaticFunctionsForIdiomaticity (p : Laurel.LaurelProgram) : IO Unit :=
     procedures it declares itself. Resolution errors are printed either way, so a
     snippet that does need the prelude says so in its golden rather than silently
     running the pass over an unresolved program. -/
-def runPassForIdiomaticityCore (pass : Laurel.LaurelPass)
+public def runPassForIdiomaticityCore (pass : Laurel.LaurelPass)
     (toInput : Laurel.LaurelProgram → Laurel.SemanticModel → Laurel.LaurelProgram)
     (render : Laurel.LaurelProgram → IO Unit)
     (prelude : Bool) (options : Laurel.LaurelTranslateOptions) (program : StrataDDM.Program) :
@@ -277,15 +277,14 @@ public def defaultLaurelTestOptions : LaurelVerifyOptions :=
     Returns diagnostics as `Message`s so the caller can choose how to
     render them (snippet-local for inline annotations, file-global for editor
     navigation). -/
-private def runLaurelResolutionRaw (gradualTypes : Std.HashSet String := {})
-    (program : StrataDDM.Program) :
+private def runLaurelResolutionRaw (program : StrataDDM.Program) :
     IO (Array Strata.Message) := do
   let uri := Strata.Uri.file "<#strata>"
   match Laurel.TransM.run uri (Laurel.parseProgram program) with
   | .error e =>
     return #[Strata.Message.fromString s!"Translation error: {e}"]
   | .ok laurelProgram =>
-    let result := Laurel.resolveWithInferredThrows (withBuiltins laurelProgram) (gradualTypes := gradualTypes)
+    let result := Laurel.resolveWithInferredThrows (withBuiltins laurelProgram)
     return result.errors
 
 /-- Run the full Laurel pipeline (translate + resolve + verify).
@@ -360,7 +359,8 @@ assume makes the assert unreachable) must set `skipCoreInterpreter := true`. -/
     unmapped labels so neither signal is lost. -/
 private def runLaurelInterpretCore (core : Core.Program) (fuel : Nat := 10000) :
     IO (Array Strata.Message) := do
-  let outcome ← match Core.Program.interpretEntries core (Core.Program.entryProcedures core) fuel with
+  let outcome ← match Core.Program.interpretEntries .execute core (Core.Program.entryProcedures
+      core) fuel with
     | .error diag => throw <| IO.userError s!"interpreter setup failed: {diag.message}"
     | .ok outcome => pure outcome
   let dms := outcome.diagnostics
@@ -1017,9 +1017,8 @@ public def testLaurelKeepIntermediates (block : SourcedProgram) : IO Unit := do
     echoes each diagnostic's file-relative `line:col` range and
     `showSnippet := true` appends the snippet-relative range. -/
 public def testLaurelResolution (block : SourcedProgram)
-    (gradualTypes : Std.HashSet String := {})
     (showLocations : Bool := false) (showSnippet : Bool := false) : IO Unit :=
-  runAndCheck block (runLaurelResolutionRaw gradualTypes) (label := "resolve")
+  runAndCheck block runLaurelResolutionRaw (label := "resolve")
     (showLocations := showLocations) (showSnippet := showSnippet)
 
 end StrataTest.Util

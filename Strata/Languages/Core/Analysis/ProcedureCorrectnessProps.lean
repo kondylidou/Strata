@@ -27,6 +27,9 @@ import all Strata.Util.ListMap
   `ProcedureAssertsValidOnTraces` backwards.
 - `axiomsBeforeProcedureDecl_of_noAxioms`: a procedure preceded by no axiom or
   `distinct` declaration has no axiom assumption at its entry.
+- `AxiomsBeforeProcedureDecl.callee`: at a call, the axioms of a callee declared no
+  later than the caller follow from the caller's entry, when they read no variable
+  (`AxiomsBeforeProcedureDecl.of_declaredBefore`, `AxiomsBeforeProcedureDecl.of_closed`).
 - `AxiomsBeforeProcedureDecl.eval_of_mem`, `AxiomsBeforeProcedureDecl.pairwise_of_mem`:
   at an entry satisfying `AxiomsBeforeProcedureDecl`, each axiom declared before the
   procedure evaluates to `true`, and the expressions of each `distinct` declared
@@ -97,6 +100,85 @@ theorem AxiomsBeforeProcedureDecl.pairwise_of_mem {entryProcName : String} {p : 
     rcases List.mem_cons.mp hd with rfl | hm
     · exact h.1
     · cases d <;> simp only [List.foldr_cons] at h <;> first | exact ih h.2 hm | exact ih h hm
+
+/-! ### Axioms at a call
+
+A call needs the callee's axioms at the callee's entry store
+(`Hoare.Procedure.call_of_contract`). The caller has its own axioms at its entry. When the
+callee is declared no later than the caller, its axioms are among the caller's, and when
+they read no variable they hold in every store over the same factory. A run keeps the
+factory, so the caller's entry assumption gives the callee's at every call. -/
+
+/-- **Closed axioms hold by the factory alone.** If the axioms and `distinct` declarations
+    before `entryProcName` read no variable, they hold in an environment once they hold in
+    one with the same factory. -/
+theorem AxiomsBeforeProcedureDecl.of_closed {entryProcName : String} {p : Program}
+    {ρ ρ' : Imperative.Env Expression}
+    (hclosed : p.axiomsClosedBeforeProcedure entryProcName = Bool.true)
+    (hfac : ρ.factory = ρ'.factory)
+    (h : AxiomsBeforeProcedureDecl entryProcName p ρ) :
+    AxiomsBeforeProcedureDecl entryProcName p ρ' := by
+  obtain ⟨σ, f⟩ := ρ
+  obtain ⟨σ', f'⟩ := ρ'
+  obtain rfl : f = f' := hfac
+  -- a closed expression evaluates alike in every store
+  have heval : ∀ {e : Expression.Expr} (σ₁ σ₂ : CoreStore), e.freeVars.isEmpty = Bool.true →
+      Expression.eval f σ₁ e = Expression.eval f σ₂ e := fun {e} _ _ he =>
+    Lambda.LExpr.denoteEval_congr e fun _ _ hx => by
+      rw [List.isEmpty_iff.mp he] at hx; cases hx
+  unfold AxiomsBeforeProcedureDecl at h ⊢
+  unfold Program.axiomsClosedBeforeProcedure at hclosed
+  rw [List.all_eq_true] at hclosed
+  generalize p.declsBeforeProcedure entryProcName = decls at h hclosed
+  induction decls with
+  | nil => trivial
+  | cons d ds ih =>
+    have hd := hclosed d List.mem_cons_self
+    have hds := fun h' => ih h' fun d hdm => hclosed d (List.mem_cons_of_mem _ hdm)
+    cases d with
+    | ax a md =>
+      simp only [List.foldr_cons] at h ⊢
+      exact ⟨(heval σ' σ hd).trans h.1, hds h.2⟩
+    | distinct name es md =>
+      simp only [List.foldr_cons] at h ⊢
+      have hes := List.all_eq_true.mp hd
+      exact ⟨h.1.imp_of_mem fun {e₁ e₂} h₁ h₂ hne heq => hne <|
+        (heval σ σ' (hes e₁ h₁)).trans <| heq.trans (heval σ' σ (hes e₂ h₂)), hds h.2⟩
+    | _ => simpa only [List.foldr_cons] using hds (by simpa only [List.foldr_cons] using h)
+
+/-- **A procedure declared no later sees no more axioms.** If the declarations before
+    `callee` are at most as many as those before `caller`, an environment that satisfies
+    the axioms before `caller` satisfies those before `callee`. -/
+theorem AxiomsBeforeProcedureDecl.of_declaredBefore {caller callee : String} {p : Program}
+    {ρ : Imperative.Env Expression}
+    (hbefore : (p.declsBeforeProcedure callee).length ≤ (p.declsBeforeProcedure caller).length)
+    (h : AxiomsBeforeProcedureDecl caller p ρ) :
+    AxiomsBeforeProcedureDecl callee p ρ := by
+  obtain ⟨rest, hrest⟩ : p.declsBeforeProcedure callee <+: p.declsBeforeProcedure caller :=
+    List.prefix_of_prefix_length_le (List.takeWhile_prefix _) (List.takeWhile_prefix _) hbefore
+  unfold AxiomsBeforeProcedureDecl at h ⊢
+  rw [← hrest] at h
+  generalize p.declsBeforeProcedure callee = decls at h
+  induction decls with
+  | nil => trivial
+  | cons d ds ih =>
+    cases d <;> simp only [List.cons_append, List.foldr_cons] at h ⊢ <;>
+      first | exact ⟨h.1, ih h.2⟩ | exact ih h
+
+/-- **The callee's axioms at a call, from the caller's entry.** Let `callee` be declared no
+    later than `caller`, with axioms and `distinct` declarations that read no variable. An
+    environment that satisfies the axioms before `caller` gives, for every store over its
+    factory, an environment that satisfies the axioms before `callee`. This is the premise
+    `haxioms` of `Hoare.Procedure.call_of_contract`, since a run keeps the factory. -/
+theorem AxiomsBeforeProcedureDecl.callee {caller callee : String} {p : Program}
+    {ρ ρ' : Imperative.Env Expression}
+    (hbefore : (p.declsBeforeProcedure callee).length ≤ (p.declsBeforeProcedure caller).length)
+    (hclosed : p.axiomsClosedBeforeProcedure callee = Bool.true)
+    (hfac : ρ.factory = ρ'.factory)
+    (h : AxiomsBeforeProcedureDecl caller p ρ) :
+    AxiomsBeforeProcedureDecl callee p ρ' :=
+  (h.of_declaredBefore hbefore).of_closed hclosed hfac
+
 
 /-! ## Postconditions checked on the trace
 
@@ -227,8 +309,8 @@ variable {π : String → Option Procedure}
 theorem procedureAssertsValidOnTraces_of_overapproximates
     (I : ConditionInterp Expression) (params : Core.Logic.InitEnvWFParams)
     (name : String) (p p' : Program) (proc proc' : Procedure) (ss ss' : Statements)
-    (h_find : p.findProcByString? name = some proc) (h_body : proc.body = .structured ss)
-    (h_find' : p'.findProcByString? name = some proc') (h_body' : proc'.body = .structured ss')
+    (h_find : p.findProcByString? name = some proc) (h_body : proc.body = .structured ss opq)
+    (h_find' : p'.findProcByString? name = some proc') (h_body' : proc'.body = .structured ss' opq)
     (h_header : proc'.header = proc.header) (h_spec : proc'.spec = proc.spec)
     (h_axioms : ∀ ρ₀, AxiomsBeforeProcedureDecl name p ρ₀ →
       AxiomsBeforeProcedureDecl name p' ρ₀)
@@ -242,17 +324,17 @@ theorem procedureAssertsValidOnTraces_of_overapproximates
     (h : ProcedureAssertsValidOnTraces I params name p') :
     ProcedureAssertsValidOnTraces I params name p := by
   have h_sim := fun ρ₀ (hent : ProcEntryEnv params name p proc ρ₀) =>
-    h_over _ _ h_T h_pre ρ₀ ρ₀ rfl (hent.1.structuredBodyWF ss h_body)
+    h_over _ _ h_T h_pre ρ₀ ρ₀ rfl (hent.1.structuredBodyWF ss _ h_body)
   have h_entry : ∀ ρ₀, ProcEntryEnv params name p proc ρ₀ →
       ProcEntryEnv params name p' proc' ρ₀ := by
     intro ρ₀ hent
     refine ⟨hent.1.of_sameSignature h_header h_spec ?_ ?_, h_axioms ρ₀ hent.2.1,
       hent.2.2.trans h_factory.symm⟩
-    · intro ss'' hb
+    · intro ss'' _ hb
       rw [h_body'] at hb
       cases hb
       exact (h_sim ρ₀ hent).2.2.2
-    · intro cfg hb
+    · intro cfg _ hb
       rw [h_body'] at hb
       cases hb
   have h_post : ∀ ρ, postconditionEvents proc' ρ = postconditionEvents proc ρ := by
@@ -264,23 +346,23 @@ theorem procedureAssertsValidOnTraces_of_overapproximates
       contract := ?_ }
   · ----- Validity on every finite prefix -----
     intro a
-    obtain ⟨proc'', ss'', hf'', hb'', hv⟩ := h.assertsValid a
+    obtain ⟨proc'', ss'', _, hf'', hb'', hv⟩ := h.assertsValid a
     have hproc : proc'' = proc' := Option.some.inj (hf''.symm.trans h_find')
     subst hproc
-    have hss : ss'' = ss' := Imperative.Body.structured.inj (hb''.symm.trans h_body')
+    have hss : ss'' = ss' := (Imperative.Body.structured.inj (hb''.symm.trans h_body')).1
     subst hss
-    refine ⟨proc, ss, h_find, h_body, ?_⟩
+    refine ⟨proc, ss, _, h_find, h_body, ?_⟩
     intro ρ₀ cfg tr hent hrun
     obtain ⟨cfg₂, tr₂, hrun₂, rfl⟩ := (h_sim ρ₀ hent).1 _ tr (Core.stmt_run_to_singleton_runE hrun)
     obtain ⟨cfg₃, hrun₃⟩ := Core.singleton_run_to_stmt_runE hrun₂
     exact hv ρ₀ cfg₃ _ (h_entry ρ₀ hent) hrun₃
   · ----- The contract -----
-    intro proc'' ss'' hf'' hb''
+    intro proc'' ss'' _ hf'' hb''
     have hproc : proc'' = proc := Option.some.inj (hf''.symm.trans h_find)
     subst hproc
-    have hss : ss'' = ss := Imperative.Body.structured.inj (hb''.symm.trans h_body)
+    have hss : ss'' = ss := (Imperative.Body.structured.inj (hb''.symm.trans h_body)).1
     subst hss
-    have htarget := h.contract proc' ss' h_find' h_body'
+    have htarget := h.contract proc' ss' _ h_find' h_body'
     intro ρ₀ ρ' tr hent hrun
     have hr := h_sim ρ₀ hent
     have htgt : ∃ ρ'', ρ' = ρ'' ∧

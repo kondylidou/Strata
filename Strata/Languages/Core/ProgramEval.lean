@@ -103,9 +103,18 @@ def eval (E : Env) : Except Strata.Message (List Env × Statistics) :=
           metadata := md }
       go rest { declsE with deferred := declsE.deferred.push ob } stats
 
-    | .distinct _ es _ =>
-        let declsE := { declsE with distinct := es :: declsE.distinct }
-      go rest declsE stats
+    | .distinct label es _ =>
+      -- Like an axiom, a `distinct` group goes into the top-level path condition, so each
+      -- obligation of a later declaration records it among its assumptions, and none of an
+      -- earlier one does, in whatever order the obligations are deferred.
+      if declsE.pathConditions.scopes.length != 1 then
+        .error (Strata.Message.fromString
+            "Internal error: path condition stack misaligned when adding a distinct declaration")
+      else
+        let declsE := { declsE with
+          distinct := es :: declsE.distinct
+          pathConditions := declsE.pathConditions.prepend (.distinct (toString label) es) }
+        go rest declsE stats
 
     | .proc proc _md =>
       -- `declsE` stays alive without the name supply, so the supply has one reference
@@ -176,9 +185,9 @@ def run (prog : Program) (moreFns : Lambda.Factory CoreLParams := Lambda.Factory
 Run a single procedure as an entry point in the concrete interpreter.
 
 Generates fresh variables for the procedure's outputs, binds them, then invokes
-the procedure with no arguments under the given `fuel` bound, returning the
-resulting environment. Inspect `.error` on the result to detect a runtime
-assertion failure (`AssertFail`), fuel exhaustion (`OutOfFuel`), or another
+the procedure with no arguments under the given `fuel` bound and call mode `mode`
+(`Statement.Command.runCall`), returning the resulting environment. Inspect `.error` on the result
+to detect a runtime assertion failure (`AssertFail`), fuel exhaustion (`OutOfFuel`), or another
 evaluation error (`Misc`).
 
 `E` is expected to be a freshly-initialized environment, e.g. the result of
@@ -189,11 +198,11 @@ producer-set `interpretEntry` marker. It is unrelated to `Core.EntryPoint`,
 which is the verifier's target selector (`.main | .roots | .all`) used to
 decide which procedures the SMT verifier targets.
 -/
-def runEntry (E : Env) (proc : Procedure) (fuel : Nat) : Env :=
+def runEntry (mode : Imperative.CallMode) (E : Env) (proc : Procedure) (fuel : Nat) : Env :=
   let outputNames := proc.header.outputs.keys.map (·.name)
   let (lhs, exprEnv) := Env.genVars outputNames E.exprEnv
   let E := { E with exprEnv }
-  Statement.Command.runCall lhs proc.header.name.name [] fuel E
+  Statement.Command.runCall mode lhs proc.header.name.name [] fuel E
 
 /-- Mark every bodied, non-recursive function in the program `inline`, so the
     concrete interpreter unfolds it at every call. Verification keeps these
@@ -347,7 +356,7 @@ structure InterpretOutcome where
 
 /--
 Concretely interpret `entries` — the entry points of the type-checked program
-`prog` — and collect every failure they produce.
+`prog` — in call mode `mode`, and collect every failure they produce.
 
 This is the single implementation of the concrete-interpretation path, shared by
 the `laurelInterpret` CLI command and the Laurel execute tests, so the two
@@ -372,8 +381,8 @@ execution can reduce them. Failures are mapped back to source through the
 metadata each failure carries, reproducing the verifier's wording for the same
 property.
 -/
-def interpretEntries (prog : Program) (entries : List Procedure) (fuel : Nat)
-    : Except Message InterpretOutcome := do
+def interpretEntries (mode : Imperative.CallMode) (prog : Program) (entries : List Procedure)
+    (fuel : Nat) : Except Message InterpretOutcome := do
   let prog := inlineBodiedFunctions prog
   let E ← prog.run
   let E := withInterpretedMaps
@@ -386,7 +395,7 @@ def interpretEntries (prog : Program) (entries : List Procedure) (fuel : Nat)
     let procName := p.header.name.name
     -- Each entry runs from the same freshly-initialized environment, so entries
     -- neither observe nor clobber each other's state.
-    let resultEnv := runEntry E p fuel
+    let resultEnv := runEntry mode E p fuel
     for (label, _e, md) in resultEnv.assertFailures.reverse do
       match Imperative.getFileRange md with
       | some fr =>

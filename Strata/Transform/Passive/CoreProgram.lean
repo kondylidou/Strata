@@ -26,8 +26,12 @@ phase (`WP/WPCoreProgram.lean`) and the SSA phase (`SSA/SSACoreProgram.lean`) sh
 Their composition is in `CoreWPSSA.lean`; the properties of the declaration phase are in
 `CoreProgramProps.lean`.
 
+The factory the SSA phase and the rewrite loop of `--vcgen wp` evaluate under is
+`Core.wpFactory`: `Core.Factory` extended by the caller's functions and by those of the
+program's datatypes.
+
 Key definitions: `avoidOf`, `declNames`, `declObligationsProgramWith`, `lemmaUnit`,
-`axiomScopesAgree`. -/
+`axiomScopesAgree`, `Core.programDatatypes`, `Core.wpFactory`. -/
 
 namespace Core
 namespace WP
@@ -156,13 +160,14 @@ private theorem eventsOf_scopesOf (E : List (Option Decl × String))
 
 /-- **The declaration phase of a program.**  `declProgram` supplies the program-level
     declarations (type declarations, evaluation-added functions with their pre-computed recursive
-    axioms, `distinct` declarations — what `toCoreProofObligationProgram` produces for a program
-    without procedures and lemmas); `lemmaObls` supplies the obligations symbolic evaluation
+    axioms — what `toCoreProofObligationProgram` produces for a program without procedures,
+    lemmas and `distinct` groups); `lemmaObls` supplies the obligations symbolic evaluation
     states for the lemmas of the input program.  They are followed by the input program's axioms,
-    its procedures unchanged, and one obligation unit per input lemma (`lemmaUnit` of the first
-    obligation of `lemmaObls` labelled with the lemma's name), **in the input's relative order**,
-    so each procedure and each obligation unit is in the scope of exactly the axioms declared
-    before its source procedure or lemma (`axiomScopesAgree`, checked).  Hoisting every axiom
+    its `distinct` declarations, its procedures unchanged, and one obligation unit per input
+    lemma (`lemmaUnit` of the first obligation of `lemmaObls` labelled with the lemma's name),
+    **in the input's relative order**, so each procedure and each obligation unit is in the scope
+    of exactly the axioms and `distinct` groups declared before its source procedure or lemma
+    (`axiomScopesAgree`, checked, for the axioms).  Hoisting every axiom
     before every procedure would let a procedure's obligations assume axioms declared after it —
     e.g. the axiom an `invokeOn` procedure contributes, which states that procedure's own
     postcondition. -/
@@ -173,7 +178,7 @@ private theorem eventsOf_scopesOf (E : List (Option Decl × String))
     lemmaObls.foldr (fun ob m => m.insert ob.label ob) {}
   let decls ← program.decls.foldlM (init := ([] : List Decl)) fun acc d => do
       match d with
-      | .ax _ _ | .proc _ _ => pure (d :: acc)
+      | .ax _ _ | .proc _ _ | .distinct _ _ _ => pure (d :: acc)
       | .lemma l _ =>
         match lemmas[l.name]? with
         | some ob => pure (lemmaUnit l.name ob :: acc)
@@ -187,4 +192,26 @@ private theorem eventsOf_scopesOf (E : List (Option Decl × String))
 end -- public section
 
 end WP
+
+public section
+
+/-- The datatype blocks a program declares, in order. -/
+@[expose] def programDatatypes (p : Program) : List (Lambda.MutualDatatype Unit) :=
+  p.decls.filterMap fun
+    | .type (.data b) _ => some b
+    | _ => none
+
+/-- **The factory of the WP pipeline's SSA phase and rewrite loop** on the program `p`:
+    `Core.Factory` extended by `moreFns`, then by the functions generated for each datatype
+    block `p` declares (its constructors, testers, destructors and eliminators), so that the
+    rewrites can fold a tester applied to a constructor.  It fails with the error of the first
+    extension that fails. -/
+@[expose] def wpFactory (moreFns : @Lambda.Factory CoreLParams) (p : Program) :
+    Except Strata.Message (@Lambda.Factory CoreLParams) := do
+  let fac ← Core.Factory.addFactory moreFns
+  (programDatatypes p).foldlM (init := fac) fun F b => do
+    F.addFactory (← Lambda.genBlockFactory (T := CoreLParams) b)
+
+end -- public section
+
 end Core

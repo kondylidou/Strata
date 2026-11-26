@@ -105,7 +105,7 @@ def otherDefs : Statements := [initT "d@1" .int (div' (iv "y@1") (int 2)),
 
 -- A definition read only by a call argument, or only by a loop's guard, measure or
 -- invariant, is kept.
-#guard dd [initT "x" .int (int 1), .cmd (.call "P" [.inArg (iv "x"), .outArg (id' "r")] md)] ==
+#guard dd [initT "x" .int (int 1), .cmd (.call "P" none [.inArg (iv "x"), .outArg (id' "r")] md)] ==
   lines ["{", "  var x : int := 1;", "  call P(x, out r);", "}"]
 #guard dd [initT "x" .int (int 1), .loop (.det (gt (iv "x") (int 0))) none [] [] md] == lines [
     "{", "  var x : int := 1;", "  while int.gt(x, 0) (none) [] {}", "}"]
@@ -187,7 +187,7 @@ def progOf (ss : Statements) : Program :=
   { decls := [.proc {
       header := { name := id' "P", typeArgs := [], inputs := [], outputs := [] },
       spec := { preconditions := [], postconditions := [] },
-      body := .structured ss } .empty] }
+      body := .structured ss false } .empty] }
 
 #guard match Strata.Core.resolvePhases (Strata.Core.nameablePhases Core.VerifyOptions.quiet)
     ["deadDefElim"] with

@@ -135,7 +135,6 @@ private def runLaurelInterpretDirect (ionBytes : ByteArray) (pflags : ParsedFlag
     { parsed with
       staticProcedures := Laurel.coreDefinitionsForLaurel.staticProcedures ++ parsed.staticProcedures,
       types := Laurel.coreDefinitionsForLaurel.types ++ parsed.types }
-    (gradualTypes := translateOptions.gradualTypes)
     (realizeCoercion := translateOptions.realizeCoercion) (toBool := translateOptions.toBool)
     (reservedNames := translateOptions.reservedNames)
   let rejected := resolved.errors.filter (·.kind != .warning)
@@ -238,7 +237,7 @@ private def runLaurelInterpret (ionBytes : ByteArray) (pflags : ParsedFlags)
   -- tests, so the evaluator configuration this command depends on — `assume`s
   -- treated as no-ops, and every assertion failure collected rather than
   -- halting on the first — is defined and regression-tested in one place.
-  let outcome ← match Core.Program.interpretEntries core entries fuel with
+  let outcome ← match Core.Program.interpretEntries .execute core entries fuel with
     | .ok outcome => pure outcome
     | .error diag => exitFailure s!"interpreter setup failed: {diag}"
 

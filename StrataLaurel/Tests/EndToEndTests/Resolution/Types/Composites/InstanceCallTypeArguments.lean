@@ -244,9 +244,9 @@ procedure determinedByTheBinding()
 /-! ## A receiver in the caller's type variables
 
 `b`'s `T := U` in `outer<U>` is what the arguments are passed at, as in the static call the lift
-makes: a `Dog` and a `Cat` both go, and `b#put(5)` is a `U`, for which `show` has no single
-overload. With no argument at `T`, `b#get()` is a `U` too, which `idf` can infer its `V` from. In
-`inMap<U>`, `m`'s `T := Map<int, U>` outranks `5`, which contradicts it. -/
+makes, and `U` is one fixed type there, which neither a `Dog`, a `Cat` nor `5` is; `b#put(5)` is a
+`U`, which no `show` takes. With no argument at `T`, `b#get()` is a `U` too, which `idf` can infer
+its `V` from. In `inMap<U>`, `m`'s `T := Map<int, U>` outranks `5`, which contradicts it. -/
 
 #eval testLaurelResolution <|
 #strata
@@ -287,8 +287,11 @@ procedure outer<U>(b: Box<U>, u: U, d: Dog, c: Cat)
   var h := idf(g);
   var w: U := b#put(u);
   var p: U := b#pick(d, c);
+//                   ^ error: cannot pass 'Dog' as the 'U' parameter of 'pick'
+//                      ^ error: cannot pass 'Cat' as the 'U' parameter of 'pick'
   show(b#put(5));
-//^^^^^^^^^^^^^^ error: ambiguous call to 'show': the argument types match more than one overload
+//           ^ error: cannot pass 'int' as the 'U' parameter of 'put'
+//^^^^^^^^^^^^^^ error: no overload of 'show' matches the argument types
   assert 1 == 1
 };
 
@@ -301,69 +304,12 @@ procedure inMap<U>(m: Box<Map<int, U>>)
 };
 #end
 
-/-! The same at a gradual type argument, here a frontend's `Any`. `m`'s `Pair<U, int>` stays
-against a less precise `Pair<Any, Any>`, and against a `Pair<int, Any>`, which is neither more nor
-less precise. A more precise `Pair<bool, int>` replaces a receiver's `Pair<Any, int>`. -/
+/-! ## In a static call, an instance call's inferred type reaches the arguments around it
 
-#eval testLaurelResolution (gradualTypes := ({} : Std.HashSet String).insert "Any") <|
-#strata
-program Laurel;
-composite Any { }
-composite Pair<A, B> {
-  var a: A
-  var b: B
-}
-composite Box<T> {
-  var v: T
-  procedure pair<V>(self: Box<T>, a: T, c: T, b: V)
-    returns (r: T)
-    opaque
-    ensures r == a
-  { r := a };
-}
-
-procedure gradualReceiver()
-  opaque
-{
-  var b: Box<Any> := new Box<Any>;
-  var p: Any := b#pair(1, 2, 5);
-  var q: Any := b#pair(1, true, 5);
-//              ^^^^^^^^^^^^^^^^^^ error: cannot infer type argument 'T' of 'pair': 'int' and 'bool' disagree
-  assert 1 == 1
-};
-
-procedure gradualArgument<U>(m: Box<Pair<U, int>>, x: Pair<Any, Any>)
-  opaque
-{
-  var y: Pair<bool, bool> := m#pair(x, x, 5);
-//                           ^^^^^^^^^^^^^^^ error: expected 'Pair<bool, bool>', got 'Pair<U, int>'
-  assert 1 == 1
-};
-
-procedure gradualInstantiation<U>(m: Box<Pair<U, int>>, x: Pair<int, Any>)
-  opaque
-{
-  var y: Pair<int, bool> := m#pair(x, x, 5);
-//                          ^^^^^^^^^^^^^^^ error: expected 'Pair<int, bool>', got 'Pair<U, int>'
-  assert 1 == 1
-};
-
-procedure gradualReceiverPart(m: Box<Pair<Any, int>>, x: Pair<bool, int>)
-  opaque
-{
-  var y: Pair<int, int> := m#pair(x, x, 5);
-//                         ^^^^^^^^^^^^^^^ error: expected 'Pair<int, int>', got 'Pair<bool, int>'
-  assert 1 == 1
-};
-#end
-
-/-! ## In a static call, an instance call's inferred type reaches only the arguments after it
-
-`bs#put(s)` is a `Set<int>`, so `same2`'s `U` is determined and `setEmpty()` after it typed, but
-not one before it: after the lift `Box$put(bs, s)` is a deferred argument, resolved after it. What
-an instance call's declared result says before inference types those before it too, here through
-methods `SubBox` inherits: all of `getSet`'s `Set<int>`, and the `int` of `getMap`'s
-`Map<int, T>`. -/
+`bs#put(s)` is a `Set<int>`, so `same2`'s `U` is determined and `setEmpty()` typed, after it or
+before it: solving the call solves `setEmpty`'s type argument, whichever is resolved first.
+Likewise through methods `SubBox` inherits: `getSet`'s `Set<int>` types `setEmpty()`, and
+`getMap`'s `Map<int, T>` the `int` of `mkThing()`. -/
 
 #eval testLaurelResolution <|
 #strata
@@ -409,7 +355,6 @@ procedure instanceCallsInAStaticCall(s: Set<int>)
   var bs: Box<Set<int>> := new Box<Set<int>>;
   same2(bs#put(s), setEmpty());
   same2(setEmpty(), bs#put(s));
-//      ^^^^^^^^^^ error: cannot infer type argument 'T' of 'setEmpty'
   var sb: SubBox<bool> := new SubBox<bool>;
   var n := pick(setEmpty(), sb#getSet());
   var k := keyOf(mkThing(), sb#getMap());
@@ -436,5 +381,37 @@ procedure unresolvedReceiver()
   var x := nope#mk();
 //         ^^^^ error: Resolution failed: 'nope' is not defined
   assert 1 == 1
+};
+#end
+
+/-! ## A receiver of a subclass that fixes `T`
+
+A subclass keeps what its `extends` clause fixes: `T` is `int` on an `IntBox`, and on a raw
+`Mixed` too, though that determines none of `Mixed`'s own type parameters. -/
+
+#eval testLaurelResolution <|
+#strata
+program Laurel;
+composite Box<T> {
+  var v: T
+  procedure get(self: Box<T>) returns (r: T) opaque;
+}
+composite IntBox extends Box<int> { }
+composite Mixed<U> extends Box<int> { }
+
+procedure fromSubclass(ib: IntBox)
+  opaque
+{
+  var n: int := ib#get();
+  var b: bool := ib#get()
+//               ^^^^^^^^ error: expected 'bool', got 'int'
+};
+
+procedure fromRawSubclass(m: Mixed)
+  opaque
+{
+  var n: int := m#get();
+  var b: bool := m#get()
+//               ^^^^^^^ error: expected 'bool', got 'int'
 };
 #end

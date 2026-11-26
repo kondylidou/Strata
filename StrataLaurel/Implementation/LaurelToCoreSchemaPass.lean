@@ -71,9 +71,6 @@ structure TranslateState where
   nextId : Nat := 1
   /-- Constants known to the program (field constants, etc.) -/
   model : SemanticModel
-  /-- Type names treated as gradual/dynamic-top (from options.gradualTypes). A `.UserDefined`
-      whose name is here maps to Core `Any` instead of hard-erroring, matching the `.Unknown` arm. -/
-  gradualTypes : Std.HashSet String := {}
   /-- Overflow check configuration -/
   overflowChecks : Core.OverflowChecks := {}
   /-- Do not process the produces Core program, since it has superfluous errors -/
@@ -196,12 +193,8 @@ def translateType (ty : HighTypeMd) : TranslateM LMonoTy := do
         let args ← ot.typeArgs.mapM (fun _ => freshTVar)
         return .tcons ot.name.text args
       | _ => do
-        -- A name registered gradual (e.g. a type imported from an unmodeled module like
-        -- `botocore.model.OperationModel`) is dynamic-top: map it to Core `Any`, exactly as the
-        -- `.Unknown` arm does, rather than hard-erroring. Otherwise resolution should already have
-        -- emitted a diagnostic, so surface the unresolved-composite error.
-        if (← get).gradualTypes.contains name.text then
-          return .tcons "Any" []
+        -- Resolution should already have emitted a diagnostic, so surface the
+        -- unresolved-composite error.
         emitCoreDiagnostic (diagnosticFromSource ty.source s!"UserDefined type {name} could not be resolved to a composite or datatype" MessageKind.strataBug)
         return .tcons name.text []
   -- A type variable lowers to a Core free type variable, which Core's HM instantiates
@@ -234,25 +227,12 @@ def translateType (ty : HighTypeMd) : TranslateM LMonoTy := do
         | _ => invalidCoreType ty.source genericReachedCoreMsg
     | _ => invalidCoreType ty.source genericReachedCoreMsg
   | .TFloat64 =>
-    -- `float64` aliases to Core `real` ONLY in gradual mode (a frontend registered gradualTypes,
-    -- e.g. Python): Core has no distinct IEEE-754 float64 sort, so a translated Python `float` is
-    -- verified with real (arbitrary-precision) semantics — sound enough for the gradual frontend
-    -- (float overflow is not modeled). In native Laurel (no gradualTypes) keep the clean
-    -- unsupported-type error rather than aliasing to real and failing deep in Core with a cryptic
-    -- unify error; revisit if Core gains a float64 sort with float-specific overflow checks.
-    if (← get).gradualTypes.isEmpty then
-      invalidCoreType ty.source "float64 not supported in native mode (no distinct Core float64 sort)"
-    else
-      return LMonoTy.real
+    -- Core has no distinct IEEE-754 float64 sort. Keep the clean unsupported-type error rather
+    -- than aliasing to real and failing deep in Core with a cryptic unify error; revisit if Core
+    -- gains a float64 sort with float-specific overflow checks.
+    invalidCoreType ty.source "float64 not supported in native mode (no distinct Core float64 sort)"
   | .MultiValuedExpr _ => invalidCoreType ty.source "MultiValuedExpr type encountered during Core translation"
-  | .Unknown =>
-    -- `.Unknown` is a gradual hole: map it to Core `Any` ONLY when a frontend has registered
-    -- gradual types (gradual mode). In native Laurel (no gradualTypes) `Any` is not a Core-native
-    -- type, so keep the old hard error rather than emit a dangling `tcons "Any"`.
-    if (← get).gradualTypes.isEmpty then
-      invalidCoreType ty.source "cannot translate Unknown type to Core"
-    else
-      return .tcons "Any" []
+  | .Unknown => invalidCoreType ty.source "cannot translate Unknown type to Core"
   | .Intersection _ => invalidCoreType ty.source "Intersection type not yet supported in Core translation"
 termination_by ty
 decreasing_by ast_recursion_decreasing
@@ -1210,7 +1190,7 @@ def translateStmt (stmt : StmtExprMd)
           callArgs := callArgs.set i (.inoutArg temp)
           copyBacks := copyBacks ++ [Core.Statement.set target (.fvar laurelLoc temp (some coreTy))
               md]
-        return inits ++ tempInits ++ [Core.Statement.call calleeId.text (callArgs ++ outArgs) md] ++ copyBacks
+        return inits ++ tempInits ++ [Core.Statement.call calleeId.text none (callArgs ++ outArgs) md] ++ copyBacks
       -- Match on the value to decide how to translate
       match _hv : value.val with
       | .Call none callee args _ =>
@@ -1279,7 +1259,7 @@ def translateStmt (stmt : StmtExprMd)
           let coreType := LTy.forAll [] (← translateType out.type)
           inits := inits ++ [Core.Statement.init ident coreType .nondet md]
           outArgs := outArgs ++ [.outArg ident]
-        return inits ++ [Core.Statement.call callee.text (callArgs ++ outArgs) md]
+        return inits ++ [Core.Statement.call callee.text none (callArgs ++ outArgs) md]
   | .Call (some _) .. => throwStmtDiagnostic (unliftedInstanceCall stmt.source)
   | .Return _ =>
       let d := md.toDiagnostic "Return statement should have been eliminated by EliminateReturnStatements pass" MessageKind.strataBug
@@ -1417,21 +1397,19 @@ def translateProcedure (proc : Procedure) : TranslateM Core.Procedure := do
         translateChecks postconds s!"postcondition"
           (defaultSummary := "postcondition")
     | _ => pure []
-  let body : List Core.Statement :=
+  -- A bodiless procedure (e.g. a generated `$hole`, or any opaque/abstract declaration) is an
+  -- abstract Core procedure: a call to it havocs its outputs and assumes its postconditions. An
+  -- opaque procedure with a body is an opaque Core procedure (`Body.isOpaque`): its callers know
+  -- it only through its contract, and its body is still verified and executed.
+  let isOpaque := match proc.body with
+    | .Opaque .. => true
+    | _ => false
+  let body : Core.Procedure.Body :=
     match bodyStmts with
-    | some ss => ss
-    | none =>
-      -- A bodiless procedure (e.g. a generated `$hole`, or any opaque/abstract
-      -- declaration) would otherwise produce an empty structured body, which the
-      -- Core interpreter rejects when called ("has no body"). Emit a single
-      -- `assume true` so the body is non-empty. This is a no-op for both
-      -- verification (such a procedure's postconditions are already marked
-      -- `free`, so there is nothing to check against the body) and concrete
-      -- execution (the outputs stay havoc'd), but it lets the interpreter step
-      -- through the call instead of erroring.
-      [Core.Statement.assume "assume_true" (.true laurelLoc) Imperative.MetaData.empty]
+    | some ss => .structured ss isOpaque
+    | none => .abstract
   let spec : Core.Procedure.Spec := { preconditions, postconditions }
-  return { header, spec, body := .structured body }
+  return { header, spec, body }
 
 structure LaurelVerifyOptions where
   translateOptions : LaurelTranslateOptions := {}
@@ -1642,7 +1620,7 @@ public def laurelToCoreSchemaPass : LaurelPass where
           | .procedure proc => r.insert proc.name.text
           | _ => r) {}
         let initState : TranslateState :=
-          { model := fnModel, overflowChecks := options.overflowChecks, procedureNames, gradualTypes := options.gradualTypes }
+          { model := fnModel, overflowChecks := options.overflowChecks, procedureNames }
         let (coreProgramResult, translateState) :=
           runTranslateM initState (translateLaurelToCore options p)
         let diagnostics : List Message :=

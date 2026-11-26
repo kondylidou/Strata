@@ -62,8 +62,8 @@ private theorem nondetElimDecls_proc_mem
     {decls : List Decl} {results : List (Decl × Bool)}
     {q : Procedure} {md : MetaData Expression} {ss : Statements}
     (h : decls.mapM nondetElimDecl = .ok results)
-    (hq : Decl.proc q md ∈ decls) (hb : q.body = .structured ss) :
-    (Decl.proc { q with body := .structured (Imperative.Block.nondetElim ss) } md,
+    (hq : Decl.proc q md ∈ decls) (hb : q.body = .structured ss opq) :
+    (Decl.proc { q with body := .structured (Imperative.Block.nondetElim ss) opq } md,
       Imperative.Block.nondetElim ss != ss) ∈ results := by
   induction decls generalizing results with
   | nil => simp at hq
@@ -90,8 +90,8 @@ private theorem nondetElim_proc_mem
     {program out : Program} {s s' : Transform.CoreTransformState} {changed : Bool}
     {q : Procedure} {md : MetaData Expression} {ss : Statements}
     (h : (nondetElim program).run s = (.ok (changed, out), s'))
-    (hq : Decl.proc q md ∈ program.decls) (hb : q.body = .structured ss) :
-    Decl.proc { q with body := .structured (Imperative.Block.nondetElim ss) } md ∈
+    (hq : Decl.proc q md ∈ program.decls) (hb : q.body = .structured ss opq) :
+    Decl.proc { q with body := .structured (Imperative.Block.nondetElim ss) opq } md ∈
       out.decls := by
   cases hmap : program.decls.mapM nondetElimDecl with
   | error error =>
@@ -133,27 +133,23 @@ theorem overapproximatesTraces (base : InitEnvWFParams)
       (EventLang.coreBlock π) (EventLang.coreBlock π)
       -- Transform nondeterministic guards in a structured block.
       (fun ss => some (Imperative.Block.nondetElim ss))
-      (fun ss =>
-        -- The bridge to base commands requires a call-free source block.
-        Statements.noCalls ss = Bool.true
-        -- The source must not define or modify generated guard names.
-        ∧ (∀ name : String, Imperative.NondetElim.isGeneratedName name →
-            HasIdent.ident (P := Expression) name ∉
-              (Block.definedVars (C := Command) ss false ++
-                Block.modifiedVars (C := Command) ss)))
+      -- The bridge to base commands requires a call-free source block.  The source gate
+      -- reserves the generated prefixes, so the source defines and modifies no generated name.
+      (fun ss => Statements.noCalls ss = Bool.true)
       -- The source reserves generated prefixes; the target consumes them.
       (base.extend Imperative.NondetElim.prefixesReserved) base := by
-  intro ss out ht hpre ρ₀ ρ₀' hEq hwf
+  intro ss out ht hnc ρ₀ ρ₀' hEq hwf
   subst hEq
   have htransform : Imperative.Block.nondetElim ss = out := Option.some.inj ht
   subst out
-  obtain ⟨hnc, hnogenCore⟩ := hpre
   obtain ⟨bs, hproj, hemb⟩ := Core.noCalls_projectStmts hnc
+  change Core.Logic.BlockInitEnvWF
+    (base.extend Imperative.NondetElim.prefixesReserved) ss ρ₀ at hwf
+  have hnogenCore := hwf.toBlockInitEnvWF.nondetElim_notDefinedOrModified
+    (fun p hp => by simp [InitEnvWFParams.extend, hp])
   have hnogen : Imperative.SrcNoGenWrites Imperative.NondetElim.isGeneratedName bs :=
     (Imperative.projectStmts_noDefinedOrModifiedKind_iff
       Imperative.NondetElim.isGeneratedName hproj).mp hnogenCore
-  change Core.Logic.BlockInitEnvWF
-    (base.extend Imperative.NondetElim.prefixesReserved) ss ρ₀ at hwf
   have hbaseWF : Imperative.Logic.BlockInitEnvWF
       (P := Expression) (CmdT := Cmd Expression)
       (base.extend Imperative.NondetElim.prefixesReserved) bs ρ₀ :=
@@ -225,7 +221,7 @@ theorem overapproximatesTraces (base : InitEnvWFParams)
     exact ⟨ρ'', trace', by
       rw [htgt]
       exact Imperative.embedConfig_stepStarE π hrunb, hout, htr⟩
-  · obtain ⟨hsem, hstore, hdefs, hdefinedReserved, hfresh, hlab, hdu, hfactory,
+  · obtain ⟨hsem, hstore, hdefs, hdefinedReserved, hfresh, hlab, hdu, hfactory, hrfactory,
         htypes, -, hmeas⟩ :=
       blockInitEnvWF_projectBase hwf hproj
     have hkindNone : ∀ name, Imperative.NondetElim.isGeneratedName name →
@@ -262,7 +258,7 @@ theorem overapproximatesTraces (base : InitEnvWFParams)
         subst ident
         exact Option.isNone_iff_eq_none.mp (hkindNone name hname)) htypes
     refine Core.Logic.BlockInitEnvWF.ofBaseEmbed hsem hstore ?_ ?_ ?_
-      (by rw [Imperative.Block.nondetElim_labels]; exact hlab) ?_ ?_ hinits.2
+      (by rw [Imperative.Block.nondetElim_labels]; exact hlab) ?_ ?_ ?_ hinits.2
       hbaseOut.fvarTypesOk (by rw [Imperative.Block.nondetElim_measures]; exact hmeas)
     · intro ident hident
       exact Option.isNone_iff_eq_none.mpr (hinits.1 ident hident)
@@ -282,6 +278,8 @@ theorem overapproximatesTraces (base : InitEnvWFParams)
         hkindFalse (fun _ h => h) hdu hnogen
     · intro name hname
       exact hfactory name hname
+    · intro f hf
+      exact hrfactory f hf
 
 /-! ## Assertion-validity reflection -/
 
@@ -292,64 +290,38 @@ theorem evalInterp_stableUnder :
       (EventArg.WithWF (P := Expression) (EventArg.ExtendsEnv NondetElimTrace.NdExtra)) :=
   Imperative.BigStep.evalInterp_stableUnder
 
-/-- Nondeterminism elimination reflects validity of an assertion from the
-transformed Core block to the source block when generated bindings do not change
-condition truth. -/
+/-- Nondeterminism elimination preserves assertion validity on call-free Core blocks, from the
+transformed block at `base` to the source block at `base` with the generated prefixes
+reserved, when generated bindings do not change condition truth. -/
 theorem assertValid (base : InitEnvWFParams)
-    {ss : Statements}
-    -- Syntactic assumptions on the source block.
-    (hnoCalls : Statements.noCalls ss = Bool.true)
-    (hnoGeneratedWrites : ∀ name,
-      Imperative.NondetElim.isGeneratedName name →
-      HasIdent.ident (P := Expression) name ∉
-        (Block.definedVars (C := Command) ss false ++
-          Block.modifiedVars (C := Command) ss))
     -- The pass must preserve the caller's inherited name reservations.
     (hprefixes : prefixesDisjoint base.prefixIdents
       Imperative.NondetElim.isGeneratedName)
     {I : ConditionInterp Expression}
     -- Generated bindings must not change the truth of captured conditions.
     (hstable : I.StableUnder
-      (EventArg.WithWF (P := Expression) (EventArg.ExtendsEnv NondetElimTrace.NdExtra)))
-    {aid : AssertId Expression}
-    -- Validity assumption on the transformed block.
-    (hvalid : AssertValidOnTracesWhen (EventLang.coreBlock π) I
-      (Core.Logic.BlockInitEnvWF base (Imperative.Block.nondetElim ss))
-      (Imperative.Block.nondetElim ss) aid) :
-    AssertValidOnTracesWhen (EventLang.coreBlock π) I
-      (Core.Logic.BlockInitEnvWF (base.extend
-    Imperative.NondetElim.prefixesReserved) ss) ss aid :=
-  overapproximatesTracesUptoWhen_assertValid I _ _
-    (EventLang.coreBlock π) (EventLang.coreBlock π)
-    (fun block => some (Imperative.Block.nondetElim block))
-    (fun block =>
-      Statements.noCalls block = Bool.true
-      ∧ (∀ name, Imperative.NondetElim.isGeneratedName name →
-          HasIdent.ident (P := Expression) name ∉
-            (Block.definedVars (C := Command) block false ++
-              Block.modifiedVars (C := Command) block)))
-    (base.extend
-    Imperative.NondetElim.prefixesReserved) (base)
+      (EventArg.WithWF (P := Expression) (EventArg.ExtendsEnv NondetElimTrace.NdExtra))) :
+    AssertValidityPreservedWhen I (EventLang.coreBlock π) (EventLang.coreBlock π)
+      (fun block => some (Imperative.Block.nondetElim block))
+      -- Syntactic assumption on the source block.
+      (fun block => Statements.noCalls block = Bool.true)
+      (base.extend Imperative.NondetElim.prefixesReserved) base :=
+  overapproximatesTraces2UptoWhen_assertValidityPreservedWhen I
     (fun _ _ htrace aid =>
       Trace.WithWF.assertionValidFrom_reflect hstable htrace aid)
-    (overapproximatesTraces π base hprefixes) rfl
-      ⟨hnoCalls, hnoGeneratedWrites⟩ hvalid
+    (overapproximatesTraces π base hprefixes)
 
 /-- **A Hoare triple transported back through nondeterminism elimination.**  For a call-free
-    Core statement list `ss` that defines and modifies no generated guard name, and a
-    precondition admitting only entry environments over `F`: a Core triple
-    `{Pre} Block.nondetElim ss {Post}` over `F` at `base` gives the triple `{Pre} ss {Post}` at
-    `base` with the generated prefixes reserved, when `Post` survives dropping generated guard
-    bindings: it holds of every environment that a target final environment extends only by
-    generated names, with the same factory, wherever it holds of the target's. -/
+    Core statement list `ss` and a precondition admitting only entry environments over `F`: a
+    Core triple `{Pre} Block.nondetElim ss {Post}` over `F` at `base` gives the triple
+    `{Pre} ss {Post}` at `base` with the generated prefixes reserved, when `Post` survives
+    dropping generated guard bindings: it holds of every environment that a target final
+    environment extends only by generated names, with the same factory, wherever it holds of
+    the target's. The reserved prefixes keep `ss` from defining or modifying a generated
+    name. -/
 theorem triple (base : InitEnvWFParams)
     {ss : Statements}
     (hnoCalls : Statements.noCalls ss = Bool.true)
-    (hnoGeneratedWrites : ∀ name,
-      Imperative.NondetElim.isGeneratedName name →
-      HasIdent.ident (P := Expression) name ∉
-        (Block.definedVars (C := Command) ss false ++
-          Block.modifiedVars (C := Command) ss))
     (hprefixes : prefixesDisjoint base.prefixIdents
       Imperative.NondetElim.isGeneratedName)
     {F : Lambda.Factory CoreLParams} {Pre Post : Env Expression → Prop}
@@ -362,7 +334,7 @@ theorem triple (base : InitEnvWFParams)
       Post F :=
   Core.Logic.triple_of_overapproximatesTraces_matches_sameEntry π evalInterp_stableUnder
     EventArg.WithWF.factory_label_metadata
-    (overapproximatesTraces π base hprefixes) rfl ⟨hnoCalls, hnoGeneratedWrites⟩ hnoCalls hpin
+    (overapproximatesTraces π base hprefixes) rfl hnoCalls hnoCalls hpin
     (fun _ _ _ _ _ _ _ h hx => hpost _ _ h hx) h
 
 /-- A successful NondetElim phase run rewrites each structured procedure body
@@ -374,32 +346,25 @@ theorem nondetElimPipelinePhase_over
       (.ok (changed, out), s'))
     (hnoCallsProgram : ProgramFact.noCalls.holds program)
     {q : Procedure} {md : MetaData Expression} {ss : Statements}
-    (hq : Decl.proc q md ∈ program.decls) (hb : q.body = .structured ss) :
-    Decl.proc { q with body := .structured (Imperative.Block.nondetElim ss) } md ∈
+    (hq : Decl.proc q md ∈ program.decls) (hb : q.body = .structured ss opq) :
+    Decl.proc { q with body := .structured (Imperative.Block.nondetElim ss) opq } md ∈
         out.decls
     ∧ ∀ (base : InitEnvWFParams),
       prefixesDisjoint base.prefixIdents Imperative.NondetElim.isGeneratedName →
-      (∀ name, Imperative.NondetElim.isGeneratedName name →
-        HasIdent.ident (P := Expression) name ∉
-          (Block.definedVars (C := Command) ss false ++
-            Block.modifiedVars (C := Command) ss)) →
       ∀ {I : ConditionInterp Expression},
         I.StableUnder (EventArg.WithWF (P := Expression)
           (EventArg.ExtendsEnv NondetElimTrace.NdExtra)) →
-      ∀ {aid : AssertId Expression},
-        AssertValidOnTracesWhen (EventLang.coreBlock π) I
-          (Core.Logic.BlockInitEnvWF base (Imperative.Block.nondetElim ss))
-          (Imperative.Block.nondetElim ss) aid →
-        AssertValidOnTracesWhen (EventLang.coreBlock π) I
-          (Core.Logic.BlockInitEnvWF (base.extend
-    Imperative.NondetElim.prefixesReserved) ss) ss aid := by
+        AssertValidityPreservedWhen I (EventLang.coreBlock π) (EventLang.coreBlock π)
+          (fun (st : Statements) =>
+            if st = ss then some (Imperative.Block.nondetElim ss) else none)
+          (fun _ => True) (base.extend Imperative.NondetElim.prefixesReserved) base := by
   have htransform : (nondetElim program).run s = (.ok (changed, out), s') := by
     rw [← nondetElimPipelinePhase_ok program s]
     exact hrun
   refine ⟨nondetElim_proc_mem htransform hq hb, ?_⟩
-  intro base hprefixes hnoGeneratedWrites I hstable aid hvalid
-  exact assertValid π base (ProgramFact.noCalls_of_program hnoCallsProgram hq hb)
-    hnoGeneratedWrites hprefixes hstable hvalid
+  exact fun base hprefixes _ hstable => assertValidityPreservedWhen_single _ fun _ aid hvalid =>
+    assertValid π base hprefixes hstable _ _ aid rfl
+      (ProgramFact.noCalls_of_program hnoCallsProgram hq hb) hvalid
 
 end Core.NondetElim
 

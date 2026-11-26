@@ -110,7 +110,7 @@ private abbrev walkBody : Core.Statements :=
    .loop .nondet none [] [.ite .nondet [innerIte] [stepUp] mdOut] mdL]
 
 /-- The translated body really is the assignment followed by the nondeterministic loop. -/
-private theorem walk_body_eq : walkProc.body = .structured walkBody := by native_decide
+private theorem walk_body_eq : walkProc.body = .structured walkBody false := by native_decide
 
 /-! ## The deterministic encoding -/
 
@@ -162,7 +162,8 @@ private def walkOut : Core.Program := match walkRun.1 with
 /-- **The Core pass encodes the body.**  The run of `Core.NondetElim.nondetElim` on the
     program succeeds, and the program it returns has the procedure with the body `walkTgt`. -/
 theorem walk_out : (∃ c σ', walkRun = (.ok (c, walkOut), σ')) ∧
-    Core.Decl.proc { walkProc with body := .structured walkTgt } walkDeclMd ∈ walkOut.decls := by
+    Core.Decl.proc { walkProc with body := .structured walkTgt false } walkDeclMd ∈ walkOut.decls :=
+        by
   have h : (match walkRun.1 with | .ok _ => true | .error _ => false) = true := by
     native_decide
   have hrun : ∃ c σ', walkRun = (.ok (c, walkOut), σ') := by
@@ -372,22 +373,17 @@ theorem walk_meets_contract :
   have hfactory : walkPgmAST.factoryBeforeProcedure "Walk" = Core.Factory :=
     Core.Program.factoryBeforeProcedure_eq_core_of_noFunctions (by decide +kernel)
   rw [Core.Logic.Hoare.Procedure.contractTriple, hfactory]
-  refine ⟨walkProc, by native_decide, by native_decide, ?_⟩
+  refine ⟨walkProc, by native_decide,
+    Core.Procedure.forall_instance_of_typeArgs_nil (by native_decide) ⟨by native_decide, ?_⟩⟩
   rw [walk_body_eq]
   -- The body proof does not use the axioms visible to the procedure.
   refine Core.Logic.Hoare.consequence _ _
     (Pre := Core.Logic.Hoare.Procedure.contractPre Core.Factory walkProc) ?_
     (fun _ h => h.1) (fun _ h => h)
-  have hvars : Block.definedVars (C := Core.Command) walkBody false ++
-      Block.modifiedVars (C := Core.Command) walkBody = [rId, rId, rId] := by decide +kernel
   have hsrc := Core.NondetElim.triple π testParams (ss := walkBody)
     (by simp [Core.Statements.noCalls, Block.allSubstmts_cons, Stmt.allSubstmts_loop,
       Stmt.allSubstmts_ite, Stmt.allSubstmts_cmd, Block.allSubstmts_nil,
       Core.Statement.isNotCall])
-    (fun name hname hmem => by
-      rw [hvars] at hmem
-      simp only [List.mem_cons, List.not_mem_nil, or_false, or_self] at hmem
-      exact r_not_generated name hname hmem)
     (fun _ hp _ _ => by simp [testParams] at hp)
     (fun _ h => h.2.1) (fun _ _ h hx => inv_of_extends h hx)
     (walk_nondetElim ▸ walkTgt_triple)

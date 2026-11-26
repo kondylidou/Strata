@@ -57,7 +57,7 @@ private def oneInputProc (y : Expression.Ident) (ty : Lambda.LMonoTy) : Procedur
         inputs := [(y, ty)]
         outputs := [] }
     spec := { preconditions := [], postconditions := [] }
-    body := .structured [] }
+    body := .structured [] false }
 
 private def oneOutputProc (y : Expression.Ident) (ty : Lambda.LMonoTy) : Procedure :=
   { header :=
@@ -66,7 +66,7 @@ private def oneOutputProc (y : Expression.Ident) (ty : Lambda.LMonoTy) : Procedu
         inputs := []
         outputs := [(y, ty)] }
     spec := { preconditions := [], postconditions := [] }
-    body := .structured [] }
+    body := .structured [] false }
 
 private def oneInoutProc (y : Expression.Ident) (ty : Lambda.LMonoTy) : Procedure :=
   { header :=
@@ -75,7 +75,7 @@ private def oneInoutProc (y : Expression.Ident) (ty : Lambda.LMonoTy) : Procedur
         inputs := [(y, ty)]
         outputs := [(y, ty)] }
     spec := { preconditions := [], postconditions := [] }
-    body := .structured [] }
+    body := .structured [] false }
 
 private def oldCalleeY : Expression.Ident := CoreIdent.mkOld calleeY.name
 
@@ -93,12 +93,12 @@ private def oneInputContractProc (y : Expression.Ident) (ty : Lambda.LMonoTy)
     spec :=
       { preconditions := [("pre", { expr := pre })]
         postconditions := [("post", { expr := post })] }
-    body := .structured [] }
+    body := .structured [] false }
 
 private def oneInputContractBodyProc (y : Expression.Ident) (ty : Lambda.LMonoTy)
     (pre post bodyCheck : Expression.Expr) : Procedure :=
   { oneInputContractProc y ty pre post with
-    body := .structured [Statement.assert "body" bodyCheck .empty] }
+    body := .structured [Statement.assert "body" bodyCheck .empty] false }
 
 private def passingBodyProc : Procedure :=
   oneInputContractBodyProc calleeY .int HasBool.tt HasBool.tt HasBool.tt
@@ -122,10 +122,12 @@ facts.
 private def calleeEnv (p : Procedure) : String → Option Procedure :=
   fun n => if n = "callee" then some p else none
 
-/-- `calleeEnv p` resolves the name `"callee"` to `p`. -/
-private theorem calleeEnv_callee (p : Procedure) :
-    calleeEnv p "callee" = some p := by
-  simp [calleeEnv]
+/-- A call to `"callee"` without type arguments runs `p` in `calleeEnv p` when `p` has no type
+    parameters. -/
+private theorem calleeEnv_callee (p : Procedure) (h : p.header.typeArgs = [] := by rfl) :
+    Calls.typeInstantiatedCallee (calleeEnv p) "callee" none = some p := by
+  simp [Calls.typeInstantiatedCallee, calleeEnv, ProcedureTypeInstantiation.instantiate,
+    Procedure.instantiateTypes, h]
 
 /-- The callee-local frame store for a one-parameter callee whose sole formal
     `calleeY` is bound to `v`: `emptyStore` extended with `calleeY ↦ v`. -/
@@ -205,7 +207,7 @@ private theorem emptyBodyExecE
     (π : String → Option Procedure)
 
     (σ : CoreStore) (fac : Expression.Factory) :
-    CoreBodyExecE π (.structured []) ⟨σ, fac⟩ σ [] := by
+    CoreBodyExecE π (.structured [] false) ⟨σ, fac⟩ σ [] := by
   have hstar : CoreStepStarE π
       (.stmt (Stmt.block "" [] #[]) ⟨σ, fac⟩) []
       (.terminal ⟨projectStore σ σ, fac⟩) := by
@@ -216,7 +218,7 @@ private theorem emptyBodyExecE
     refine ReflTransTrace.step _ [] _ [] _
       (StepStmtE.step_block_done) ?_
     exact ReflTransTrace.refl _
-  have h := CoreBodyExecE.structured (π := π) (ss := [])
+  have h := CoreBodyExecE.structured (opq := false) (π := π) (ss := [])
     (ρ := ⟨σ, fac⟩) (ρ' := ⟨projectStore σ σ, fac⟩) hstar
   simpa [projectStore_self] using h
 
@@ -325,7 +327,7 @@ private theorem assertBodyExecE
 
     (fac : Expression.Factory) (σ : CoreStore)
     (label : String) (e : Expression.Expr) :
-    CoreBodyExecE π (.structured [Statement.assert label e .empty]) ⟨σ, fac⟩ σ
+    CoreBodyExecE π (.structured [Statement.assert label e .empty] false) ⟨σ, fac⟩ σ
       [assertEvent fac σ label e] := by
   let ρ : Env Expression := ⟨σ, fac⟩
   have hcmdE : EvalCommandE π fac σ
@@ -348,7 +350,7 @@ private theorem assertBodyExecE
     refine ReflTransTrace.step _ [] _ _ _
       (StepStmtE.step_block_done) ?_
     exact ReflTransTrace.refl _
-  have h := CoreBodyExecE.structured (π := π)
+  have h := CoreBodyExecE.structured (opq := false) (π := π)
     (ss := [Statement.assert label e .empty]) (ρ := ⟨σ, fac⟩)
     (ρ' := ⟨projectStore σ σ, fac⟩) hstar
   simpa [projectStore_self] using h
@@ -361,9 +363,9 @@ private theorem assertBodyExecEUnique
     {fac : Expression.Factory} {σ end₁ end₂ : CoreStore}
     {label : String} {e : Expression.Expr}
     {emitted₁ emitted₂ : Trace Expression}
-    (h₁ : CoreBodyExecE π (.structured [Statement.assert label e .empty])
+    (h₁ : CoreBodyExecE π (.structured [Statement.assert label e .empty] false)
       ⟨σ, fac⟩ end₁ emitted₁)
-    (h₂ : CoreBodyExecE π (.structured [Statement.assert label e .empty])
+    (h₂ : CoreBodyExecE π (.structured [Statement.assert label e .empty] false)
       ⟨σ, fac⟩ end₂ emitted₂) :
     end₁ = end₂ ∧ emitted₁ = emitted₂ :=
   h₁.singleton_cmd_unique EvalCommandE.assert_unique h₂
@@ -382,8 +384,8 @@ private theorem emptyBodyExecEUnique
 
     {fac : Expression.Factory} {σ end₁ end₂ : CoreStore}
     {emitted₁ emitted₂ : Trace Expression}
-    (h₁ : CoreBodyExecE π (.structured []) ⟨σ, fac⟩ end₁ emitted₁)
-    (h₂ : CoreBodyExecE π (.structured []) ⟨σ, fac⟩ end₂ emitted₂) :
+    (h₁ : CoreBodyExecE π (.structured [] false) ⟨σ, fac⟩ end₁ emitted₁)
+    (h₂ : CoreBodyExecE π (.structured [] false) ⟨σ, fac⟩ end₂ emitted₂) :
     end₁ = end₂ ∧ emitted₁ = emitted₂ := by
   obtain ⟨hstore₁, hemitted₁⟩ := h₁.empty_unique π σ end₁ fac emitted₁
   obtain ⟨hstore₂, hemitted₂⟩ := h₂.empty_unique π σ end₂ fac emitted₂
@@ -394,28 +396,30 @@ private theorem uniqueEvalCommandE
     {π : String → Option Procedure}
 
     {fac : Expression.Factory} {σ expected : CoreStore} {n : String}
+    {tyArgs : Option (List Expression.Ty)}
     {p : Procedure} {args : List (CallArg Expression)}
     {md : MetaData Expression} {emitted : Trace Expression}
-    (hLookup : π n = some p)
+    (hLookup : Calls.typeInstantiatedCallee π n tyArgs = some p) (hNotOpaque : ¬p.body.isOpaque)
     (hBodyUnique : ∀ {frame end₁ end₂ : CoreStore}
       {bodyEvents₁ bodyEvents₂ : Trace Expression},
       CoreBodyExecE π p.body ⟨frame, fac⟩ end₁ bodyEvents₁ →
       CoreBodyExecE π p.body ⟨frame, fac⟩ end₂ bodyEvents₂ →
       end₁ = end₂ ∧ bodyEvents₁ = bodyEvents₂)
-    (h : EvalCommandE π fac σ (.call n args md) expected emitted) :
-    UniqueResult (EvalCommandE π fac σ (.call n args md)) expected emitted :=
-  ⟨h, fun _ _ h' => h'.call_unique_of_body_unique hLookup hBodyUnique h⟩
+    (h : EvalCommandE π fac σ (.call n tyArgs args md) expected emitted) :
+    UniqueResult (EvalCommandE π fac σ (.call n tyArgs args md)) expected emitted :=
+  ⟨h, fun _ _ h' => h'.call_unique_of_body_unique hLookup hNotOpaque hBodyUnique h⟩
 
 /-- Package a no-output event contract call witness with pairwise
 store-and-trace determinism. -/
 private theorem uniqueEvalCommandContractE
     {π : String → Option Procedure} {fac : Expression.Factory}
-    {σ expected : CoreStore} {n : String} {p : Procedure}
+    {σ expected : CoreStore} {n : String} {tyArgs : Option (List Expression.Ty)} {p : Procedure}
     {args : List (CallArg Expression)} {md : MetaData Expression}
     {emitted : Trace Expression}
-    (hLookup : π n = some p) (hOutputs : ListMap.keys p.header.outputs = [])
-    (h : EvalCommandContractE π fac σ (.call n args md) expected emitted) :
-    UniqueResult (EvalCommandContractE π fac σ (.call n args md)) expected emitted :=
+    (hLookup : Calls.typeInstantiatedCallee π n tyArgs = some p)
+    (hOutputs : ListMap.keys p.header.outputs = [])
+    (h : EvalCommandContractE π fac σ (.call n tyArgs args md) expected emitted) :
+    UniqueResult (EvalCommandContractE π fac σ (.call n tyArgs args md)) expected emitted :=
   ⟨h, fun _ _ h' => h'.call_unique_of_outputs_nil hLookup hOutputs h⟩
 
 /-=============================================================================
@@ -442,15 +446,15 @@ example
     -- Both semantics have a unique complete result: `σ` plus no events.
     UniqueResult
       (EvalCommandE (calleeEnv (oneInputProc calleeY .int)) fac σ
-        (.call "callee" [.inArg (intVal 2)] .empty)) σ [] ∧
+        (.call "callee" none [.inArg (intVal 2)] .empty)) σ [] ∧
     UniqueResult
       (EvalCommandContractE (calleeEnv (oneInputProc calleeY .int)) fac σ
-        (.call "callee" [.inArg (intVal 2)] .empty)) σ [] := by
+        (.call "callee" none [.inArg (intVal 2)] .empty)) σ [] := by
   refine ⟨?_, ?_⟩
-  · apply uniqueEvalCommandE (calleeEnv_callee _) emptyBodyExecEUnique
+  · apply uniqueEvalCommandE (calleeEnv_callee _) (by decide) emptyBodyExecEUnique
     simpa [defaultAssertEvents, Calls.defaultAssertEvents, Calls.checksAtCall,
       MetaData.setCallSiteFileRange_empty, ListMap.toList, oneInputProc] using
-      EvalCommandE.call_sem (calleeEnv_callee _)
+      EvalCommandE.call_sem (calleeEnv_callee _) rfl
         ⟨_, _, evalExpressions_intVal fac σ 2, .read_none, initCallFrame_oneInput .int (intV fac 2)⟩
         (emptyBodyExecE _ _ _)
             ⟨(by simp [Imperative.CallArg.getLhs]), _, .read_none, .update_none, .nil⟩
@@ -491,12 +495,12 @@ example
     -- nondeterministic and exhibits the allowed `y = 9` choice below.
     UniqueResult
       (EvalCommandE (calleeEnv oneInoutOldProc) fac (calleeFrame (intV fac 7))
-        (.call "callee" [.inoutArg calleeY] .empty))
+        (.call "callee" none [.inoutArg calleeY] .empty))
       (calleeFrame (intV fac 7))
       [assertEvent fac (inoutFrame (intV fac 7)) "old" oldYIs7] ∧
     EvalCommandContractE (calleeEnv oneInoutOldProc) fac
       (calleeFrame (intV fac 7))
-      (.call "callee" [.inoutArg calleeY] .empty)
+      (.call "callee" none [.inoutArg calleeY] .empty)
       (inoutResultStore fac)
       [assumeEvent fac
         (updatedState (inoutFrame (intV fac 7)) calleeY (intV fac 9))
@@ -548,11 +552,11 @@ example
         intVal_valueOfTy fac 9⟩ .nil⟩
     simpa [oneInoutOldProc, oneInoutProc, ProcedureHeader.outputParams, ListMap.keys] using hreadO
   refine ⟨?_, ?_⟩
-  · apply uniqueEvalCommandE (calleeEnv_callee _) emptyBodyExecEUnique
+  · apply uniqueEvalCommandE (calleeEnv_callee _) (by decide) emptyBodyExecEUnique
     simpa [MetaData.empty, defaultAssertEvents, Calls.defaultAssertEvents, Calls.checksAtCall,
       MetaData.setCallSiteFileRange_empty, ListMap.toList,
       assertEvent, oneInoutOldProc] using
-      EvalCommandE.call_sem (calleeEnv_callee _) hentry
+      EvalCommandE.call_sem (calleeEnv_callee _) rfl hentry
         (emptyBodyExecE _ _ _) hexit
   · simpa [MetaData.empty, defaultAssertEvents, Calls.defaultAssertEvents, Calls.checksAtCall,
       MetaData.setCallSiteFileRange_empty, ListMap.toList,
@@ -597,10 +601,10 @@ example
     -- and demonstrates the allowed `(copyResultStore fac)` choice.
     UniqueResult
       (EvalCommandE (calleeEnv (oneOutputProc calleeY .int)) fac (copyCallerStore fac)
-        (.call "callee" [.outArg callerResult] .empty)) (copyCallerStore fac) [] ∧
+        (.call "callee" none [.outArg callerResult] .empty)) (copyCallerStore fac) [] ∧
     EvalCommandContractE (calleeEnv (oneOutputProc calleeY .int)) fac
         (copyCallerStore fac)
-        (.call "callee" [.outArg callerResult] .empty)
+        (.call "callee" none [.outArg callerResult] .empty)
         (copyResultStore fac) [] := by
 
   have hcaller : (copyCallerStore fac) callerResult = some (intV fac 7) := by
@@ -642,10 +646,10 @@ example
       (copyResultStore fac) :=
     .update_some (updatedStateUpdate hcaller) .update_none
   refine ⟨?_, ?_⟩
-  · apply uniqueEvalCommandE (calleeEnv_callee _) emptyBodyExecEUnique
+  · apply uniqueEvalCommandE (calleeEnv_callee _) (by decide) emptyBodyExecEUnique
     simpa [defaultAssertEvents, Calls.defaultAssertEvents, Calls.checksAtCall,
       MetaData.setCallSiteFileRange_empty, ListMap.toList, oneOutputProc] using
-      EvalCommandE.call_sem (calleeEnv_callee _) hentry
+      EvalCommandE.call_sem (calleeEnv_callee _) rfl hentry
         (emptyBodyExecE _ _ _) hexit
   · simpa [defaultAssertEvents, Calls.defaultAssertEvents, Calls.checksAtCall,
       MetaData.setCallSiteFileRange_empty, ListMap.toList, assumeEvents,
@@ -684,13 +688,13 @@ example
     -- their unique complete result; traces distinguish checks from abstraction.
     UniqueResult
       (EvalCommandE (calleeEnv passingBodyProc) fac σ
-        (.call "callee" [.inArg (intVal 0)] .empty)) σ
+        (.call "callee" none [.inArg (intVal 0)] .empty)) σ
       [assertEvent fac (calleeFrame (intV fac 0)) "pre" HasBool.tt,
        assertEvent fac (calleeFrame (intV fac 0)) "body" HasBool.tt,
        assertEvent fac (calleeFrame (intV fac 0)) "post" HasBool.tt] ∧
     UniqueResult
       (EvalCommandContractE (calleeEnv passingBodyProc) fac σ
-        (.call "callee" [.inArg (intVal 0)] .empty)) σ
+        (.call "callee" none [.inArg (intVal 0)] .empty)) σ
       [assertEvent fac (calleeFrame (intV fac 0)) "pre" HasBool.tt,
        assumeEvent fac (calleeFrame (intV fac 0)) "post" HasBool.tt] := by
 
@@ -699,7 +703,7 @@ example
   have hbodyE := assertBodyExecE (calleeEnv (passingBodyProc))
     fac (calleeFrame (intV fac 0)) "body" HasBool.tt
   refine ⟨?_, ?_⟩
-  · apply uniqueEvalCommandE (calleeEnv_callee _) (fun h₁ h₂ => by
+  · apply uniqueEvalCommandE (calleeEnv_callee _) (by decide) (fun h₁ h₂ => by
       simpa [passingBodyProc, oneInputContractBodyProc] using
         assertBodyExecEUnique h₁ h₂)
     simpa [MetaData.empty, passingBodyProc, defaultAssertEvents, Calls.defaultAssertEvents,
@@ -707,6 +711,7 @@ example
       ListMap.toList, assertEvent,
       oneInputContractBodyProc, oneInputContractProc] using
       EvalCommandE.call_sem (callArgs := [.inArg (intVal 0)]) (md := .empty) (calleeEnv_callee _)
+          rfl
         ⟨_, _, evalExpressions_intVal fac σ 0, .read_none, hframe⟩
         hbodyE ⟨(by simp [Imperative.CallArg.getLhs]), _, .read_none, .update_none, .nil⟩
   · apply uniqueEvalCommandContractE (calleeEnv_callee _) (by rfl)
@@ -744,24 +749,25 @@ example
     UniqueResult
       (EvalCommandE
         (calleeEnv (oneInputContractProc calleeY .int HasBool.tt HasBool.ff))
-        fac σ (.call "callee" [.inArg (intVal 0)] .empty)) σ
+        fac σ (.call "callee" none [.inArg (intVal 0)] .empty)) σ
       [assertEvent fac (calleeFrame (intV fac 0)) "pre" HasBool.tt,
        assertEvent fac (calleeFrame (intV fac 0)) "post" HasBool.ff] ∧
     UniqueResult
       (EvalCommandContractE
         (calleeEnv (oneInputContractProc calleeY .int HasBool.tt HasBool.ff))
-        fac σ (.call "callee" [.inArg (intVal 0)] .empty)) σ
+        fac σ (.call "callee" none [.inArg (intVal 0)] .empty)) σ
       [assertEvent fac (calleeFrame (intV fac 0)) "pre" HasBool.tt,
        assumeEvent fac (calleeFrame (intV fac 0)) "post" HasBool.ff] := by
 
   have hframe : InitCallFrame (oneInputContractProc calleeY .int HasBool.tt HasBool.ff)
       [intV fac 0] [] (calleeFrame (intV fac 0)) := initCallFrame_oneInput (ty := .int) (intV fac 0)
   refine ⟨?_, ?_⟩
-  · apply uniqueEvalCommandE (calleeEnv_callee _) emptyBodyExecEUnique
+  · apply uniqueEvalCommandE (calleeEnv_callee _) (by decide) emptyBodyExecEUnique
     simpa [MetaData.empty, defaultAssertEvents, Calls.defaultAssertEvents, Calls.checksAtCall,
       MetaData.setCallSiteFileRange_empty, ListMap.toList,
       assertEvent, oneInputContractProc] using
       EvalCommandE.call_sem (callArgs := [.inArg (intVal 0)]) (md := .empty) (calleeEnv_callee _)
+          rfl
         ⟨_, _, evalExpressions_intVal fac σ 0, .read_none, hframe⟩
         (emptyBodyExecE _ _ _)
             ⟨(by simp [Imperative.CallArg.getLhs]), _, .read_none, .update_none, .nil⟩
@@ -802,13 +808,13 @@ example
     -- has the body assertion, while contract semantics abstracts it away.
     UniqueResult
       (EvalCommandE (calleeEnv failingBodyProc) fac σ
-        (.call "callee" [.inArg (intVal 0)] .empty)) σ
+        (.call "callee" none [.inArg (intVal 0)] .empty)) σ
       [assertEvent fac (calleeFrame (intV fac 0)) "pre" HasBool.tt,
        assertEvent fac (calleeFrame (intV fac 0)) "body" HasBool.ff,
        assertEvent fac (calleeFrame (intV fac 0)) "post" HasBool.tt] ∧
     UniqueResult
       (EvalCommandContractE (calleeEnv failingBodyProc) fac σ
-        (.call "callee" [.inArg (intVal 0)] .empty)) σ
+        (.call "callee" none [.inArg (intVal 0)] .empty)) σ
       [assertEvent fac (calleeFrame (intV fac 0)) "pre" HasBool.tt,
        assumeEvent fac (calleeFrame (intV fac 0)) "post" HasBool.tt] := by
 
@@ -817,7 +823,7 @@ example
   have hbodyE := assertBodyExecE (calleeEnv (failingBodyProc))
     fac (calleeFrame (intV fac 0)) "body" HasBool.ff
   refine ⟨?_, ?_⟩
-  · apply uniqueEvalCommandE (calleeEnv_callee _) (fun h₁ h₂ => by
+  · apply uniqueEvalCommandE (calleeEnv_callee _) (by decide) (fun h₁ h₂ => by
       simpa [failingBodyProc, oneInputContractBodyProc] using
         assertBodyExecEUnique h₁ h₂)
     simpa [MetaData.empty, defaultAssertEvents, Calls.defaultAssertEvents, Calls.checksAtCall,
@@ -825,6 +831,7 @@ example
       assertEvent, failingBodyProc,
       oneInputContractBodyProc, oneInputContractProc] using
       EvalCommandE.call_sem (callArgs := [.inArg (intVal 0)]) (md := .empty) (calleeEnv_callee _)
+          rfl
         ⟨_, _, evalExpressions_intVal fac σ 0, .read_none, hframe⟩
         hbodyE ⟨(by simp [Imperative.CallArg.getLhs]), _, .read_none, .update_none, .nil⟩
   · apply uniqueEvalCommandContractE (calleeEnv_callee _) (by rfl)
@@ -862,24 +869,25 @@ example
     UniqueResult
       (EvalCommandE
         (calleeEnv (oneInputContractProc calleeY .int HasBool.ff HasBool.tt))
-        fac σ (.call "callee" [.inArg (intVal 0)] .empty)) σ
+        fac σ (.call "callee" none [.inArg (intVal 0)] .empty)) σ
       [assertEvent fac (calleeFrame (intV fac 0)) "pre" HasBool.ff,
        assertEvent fac (calleeFrame (intV fac 0)) "post" HasBool.tt] ∧
     UniqueResult
       (EvalCommandContractE
         (calleeEnv (oneInputContractProc calleeY .int HasBool.ff HasBool.tt))
-        fac σ (.call "callee" [.inArg (intVal 0)] .empty)) σ
+        fac σ (.call "callee" none [.inArg (intVal 0)] .empty)) σ
       [assertEvent fac (calleeFrame (intV fac 0)) "pre" HasBool.ff,
        assumeEvent fac (calleeFrame (intV fac 0)) "post" HasBool.tt] := by
 
   have hframe : InitCallFrame (oneInputContractProc calleeY .int HasBool.ff HasBool.tt)
       [intV fac 0] [] (calleeFrame (intV fac 0)) := initCallFrame_oneInput (ty := .int) (intV fac 0)
   refine ⟨?_, ?_⟩
-  · apply uniqueEvalCommandE (calleeEnv_callee _) emptyBodyExecEUnique
+  · apply uniqueEvalCommandE (calleeEnv_callee _) (by decide) emptyBodyExecEUnique
     simpa [MetaData.empty, defaultAssertEvents, Calls.defaultAssertEvents, Calls.checksAtCall,
       MetaData.setCallSiteFileRange_empty, ListMap.toList,
       assertEvent, oneInputContractProc] using
       EvalCommandE.call_sem (callArgs := [.inArg (intVal 0)]) (md := .empty) (calleeEnv_callee _)
+          rfl
         ⟨_, _, evalExpressions_intVal fac σ 0, .read_none, hframe⟩
         (emptyBodyExecE _ _ _)
             ⟨(by simp [Imperative.CallArg.getLhs]), _, .read_none, .update_none, .nil⟩
@@ -897,16 +905,30 @@ private def noArgProc (name : String) (body : Statements) : Procedure :=
   { header :=
       { name := ⟨name, ()⟩, typeArgs := [], inputs := [], outputs := [] }
     spec := { preconditions := [], postconditions := [] }
-    body := .structured body }
+    body := .structured body false }
 
 private def leafProc : Procedure := noArgProc "leaf" []
 private def middleProc : Procedure :=
-  noArgProc "middle" [.cmd (.call "leaf" [] .empty)]
+  noArgProc "middle" [.cmd (.call "leaf" none [] .empty)]
 
 private def nestedProcEnv (name : String) : Option Procedure :=
   if name == "leaf" then some leafProc
   else if name == "middle" then some middleProc
   else none
+
+/-- A call to `leaf` without type arguments runs `leafProc`. -/
+private theorem nestedProcEnv_leaf :
+    Calls.typeInstantiatedCallee nestedProcEnv "leaf" none = some leafProc := by
+  simp [Calls.typeInstantiatedCallee, ProcedureTypeInstantiation.instantiate,
+    Procedure.instantiateTypes,
+    nestedProcEnv, leafProc, noArgProc]
+
+/-- A call to `middle` without type arguments runs `middleProc`. -/
+private theorem nestedProcEnv_middle :
+    Calls.typeInstantiatedCallee nestedProcEnv "middle" none = some middleProc := by
+  simp [Calls.typeInstantiatedCallee, ProcedureTypeInstantiation.instantiate,
+    Procedure.instantiateTypes,
+    nestedProcEnv, middleProc, noArgProc]
 
 /-- Initializing an argument-less procedure's call frame yields the empty store. -/
 private theorem emptyFrame (name : String) (body : Statements) :
@@ -939,18 +961,18 @@ example
     -- abstracts the outer call. Every relation uniquely returns `emptyStore`
     -- with an empty trace.
     UniqueResult
-      (EvalCommandE nestedProcEnv fac emptyStore (.call "middle" [] .empty))
+      (EvalCommandE nestedProcEnv fac emptyStore (.call "middle" none [] .empty))
       emptyStore [] ∧
     UniqueResult
-      (EvalCommandContractE nestedProcEnv fac emptyStore (.call "middle" [] .empty))
+      (EvalCommandContractE nestedProcEnv fac emptyStore (.call "middle" none [] .empty))
       emptyStore [] := by
   -- Leaf has no contract clauses and an empty body, so its call emits no events.
   have hleafE : EvalCommandE nestedProcEnv fac emptyStore
-      (.call "leaf" [] .empty) emptyStore [] := by
+      (.call "leaf" none [] .empty) emptyStore [] := by
     simpa [defaultAssertEvents, Calls.defaultAssertEvents, Calls.checksAtCall,
       MetaData.setCallSiteFileRange_empty, ListMap.toList, leafProc,
       noArgProc] using
-      EvalCommandE.call_sem (π := nestedProcEnv) (by simp [nestedProcEnv, leafProc])
+      EvalCommandE.call_sem (π := nestedProcEnv) nestedProcEnv_leaf rfl
         ⟨_, _, .eval_none, .read_none, emptyFrame "leaf" []⟩
         (emptyBodyExecE nestedProcEnv emptyStore fac)
         ⟨(by simp [Imperative.CallArg.getLhs]), _, .read_none, .update_none, .nil⟩
@@ -960,9 +982,9 @@ example
       ⟨emptyStore, fac⟩ emptyStore [] := by
     unfold middleProc noArgProc
     change CoreBodyExecE nestedProcEnv
-      (.structured [.cmd (.call "leaf" [] .empty)]) ⟨emptyStore, fac⟩ emptyStore []
+      (.structured [.cmd (.call "leaf" none [] .empty)] false) ⟨emptyStore, fac⟩ emptyStore []
     have hstar : CoreStepStarE nestedProcEnv
-        (.stmt (Stmt.block "" [.cmd (.call "leaf" [] .empty)] #[]) ρ) []
+        (.stmt (Stmt.block "" [.cmd (.call "leaf" none [] .empty)] #[]) ρ) []
         (.terminal ⟨projectStore emptyStore emptyStore, fac⟩) := by
       refine ReflTransTrace.step _ [] _ _ _
         (StepStmtE.step_block) ?_
@@ -977,8 +999,8 @@ example
       refine ReflTransTrace.step _ [] _ _ _
         (StepStmtE.step_block_done) ?_
       exact ReflTransTrace.refl _
-    have h := CoreBodyExecE.structured (π := nestedProcEnv)
-      (ss := [.cmd (.call "leaf" [] .empty)]) (ρ := ⟨emptyStore, fac⟩)
+    have h := CoreBodyExecE.structured (opq := false) (π := nestedProcEnv)
+      (ss := [.cmd (.call "leaf" none [] .empty)]) (ρ := ⟨emptyStore, fac⟩)
       (ρ' := ⟨projectStore emptyStore emptyStore, fac⟩) hstar
     simpa [projectStore_self] using h
   have hmiddleBodyEUnique : ∀ {frame end₁ end₂ : CoreStore}
@@ -988,27 +1010,27 @@ example
       end₁ = end₂ ∧ emitted₁ = emitted₂ := by
     intro frame end₁ end₂ emitted₁ emitted₂ h₁ h₂
     change CoreBodyExecE nestedProcEnv
-      (.structured [.cmd (.call "leaf" [] .empty)]) ⟨frame, fac⟩ end₁ emitted₁ at h₁
+      (.structured [.cmd (.call "leaf" none [] .empty)] false) ⟨frame, fac⟩ end₁ emitted₁ at h₁
     change CoreBodyExecE nestedProcEnv
-      (.structured [.cmd (.call "leaf" [] .empty)]) ⟨frame, fac⟩ end₂ emitted₂ at h₂
+      (.structured [.cmd (.call "leaf" none [] .empty)] false) ⟨frame, fac⟩ end₂ emitted₂ at h₂
     exact h₁.singleton_cmd_unique
       (fun hcmd₁ hcmd₂ => hcmd₁.call_unique_of_body_unique (p := leafProc)
-        (by simp [nestedProcEnv, leafProc]) emptyBodyExecEUnique hcmd₂) h₂
+        nestedProcEnv_leaf nofun emptyBodyExecEUnique hcmd₂) h₂
   refine ⟨?_, ?_⟩
-  · apply uniqueEvalCommandE (p := middleProc) (by simp [nestedProcEnv, middleProc]) hmiddleBodyEUnique
+  · apply uniqueEvalCommandE (p := middleProc) nestedProcEnv_middle nofun hmiddleBodyEUnique
     simpa [defaultAssertEvents, Calls.defaultAssertEvents, Calls.checksAtCall,
       MetaData.setCallSiteFileRange_empty, ListMap.toList, middleProc,
       noArgProc] using
-      EvalCommandE.call_sem (by simp [nestedProcEnv, middleProc])
-        ⟨_, _, .eval_none, .read_none, emptyFrame "middle" [.cmd (.call "leaf" [] .empty)]⟩
+      EvalCommandE.call_sem nestedProcEnv_middle rfl
+        ⟨_, _, .eval_none, .read_none, emptyFrame "middle" [.cmd (.call "leaf" none [] .empty)]⟩
         hmiddleBodyE ⟨(by simp [Imperative.CallArg.getLhs]), _, .read_none, .update_none, .nil⟩
   · apply uniqueEvalCommandContractE (p := middleProc)
-      (by simp [nestedProcEnv, middleProc]) (by rfl)
+      nestedProcEnv_middle (by rfl)
     simpa [defaultAssertEvents, Calls.defaultAssertEvents, Calls.checksAtCall,
       MetaData.setCallSiteFileRange_empty, ListMap.toList, assumeEvents,
       Calls.assumeEvents, middleProc, noArgProc] using
-      EvalCommandContractE.call_sem (by simp [nestedProcEnv, middleProc])
-        ⟨_, _, .eval_none, .read_none, emptyFrame "middle" [.cmd (.call "leaf" [] .empty)]⟩
+      EvalCommandContractE.call_sem nestedProcEnv_middle
+        ⟨_, _, .eval_none, .read_none, emptyFrame "middle" [.cmd (.call "leaf" none [] .empty)]⟩
         .update_none ⟨(by simp [Imperative.CallArg.getLhs]), _, .read_none, .update_none, .nil⟩
 
 /-! ## The typing restrictions reject ill-typed entries and write-backs -/

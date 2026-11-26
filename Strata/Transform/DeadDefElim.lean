@@ -89,7 +89,7 @@ variable [Hashable P.Ident]
   | .cmd (.init x _ (.det e) _) | .cmd (.set x (.det e) _) => insertFV (h.insert x) e
   | .cmd (.init x _ .nondet _) | .cmd (.set x .nondet _) => h.insert x
   | .cmd (.assume _ e _) | .cmd (.assert _ e _) | .cmd (.cover _ e _) => insertFV h e
-  | .call _ args _ => args.foldl insertCallArg h
+  | .call _ _ args _ => args.foldl insertCallArg h
 
 mutual
 /-- Insert every identifier of a statement list (`Block.idents`). -/
@@ -158,10 +158,10 @@ open Imperative Imperative.DeadDefElim
     whether that body changed. -/
 @[expose] def deadDefElimDecl : Decl → Decl × Bool
   | .proc q md => match q.body with
-    | .structured ss =>
+    | .structured ss o =>
       let ss' := deadDefElimH [] ss
-      (.proc { q with body := .structured ss' } md, ss' != ss)
-    | .cfg _ => (.proc q md, false)
+      (.proc { q with body := .structured ss' o } md, ss' != ss)
+    | .cfg _ _ | .abstract => (.proc q md, false)
   | d => (d, false)
 
 /-- **The dead-definition transform.**  Every procedure of the program with the unread `init`s
@@ -173,6 +173,25 @@ open Imperative Imperative.DeadDefElim
   return (r.any (·.2), { decls := r.map (·.1) })
 
 end DeadDefElim
+
+/-- The declaration with its structured procedure body rewritten by `f`, and the test `changed`
+    on the old and the new body; any other declaration unchanged, with `false`. -/
+@[expose] def Decl.mapStructuredBody (f : Statements → Statements)
+    (changed : Statements → Statements → Bool) : Decl → Decl × Bool
+  | .proc q md => match q.body with
+    | .structured ss o =>
+      let ss' := f ss
+      (.proc { q with body := .structured ss' o } md, changed ss ss')
+    | .cfg _ _ | .abstract => (.proc q md, false)
+  | d => (d, false)
+
+/-- Every procedure of the program with its structured body rewritten by `f`, every other
+    declaration unchanged, and whether `changed` holds of the old and the new body of some
+    procedure (by default: whether some procedure body changed). -/
+@[expose] def Program.mapStructuredBodies (f : Statements → Statements) (p : Program)
+    (changed : Statements → Statements → Bool := fun ss ss' => ss' != ss) : Bool × Program :=
+  let r := p.decls.map (Decl.mapStructuredBody f changed)
+  (r.any (·.2), { decls := r.map (·.1) })
 
 /-- The dead-definition elimination pipeline phase: removes from each procedure body
     the `init`s whose variable no later statement mentions

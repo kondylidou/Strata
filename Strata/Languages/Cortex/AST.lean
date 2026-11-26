@@ -114,6 +114,15 @@ structure Precondition where
   cond : Expr
   md : MD := .empty
 
+/-- A postcondition, checked when its procedure returns normally, with this
+postcondition's location and property summary. Its condition reads the outputs and
+the globals at return, an input that is not an output at entry, and `old x` (the
+variable `CoreIdent.mkOld x`) at entry for a global or an input and output `x`. -/
+structure Postcondition where
+  label : String
+  cond : Expr
+  md : MD := .empty
+
 structure Procedure where
   name : ProcName
   inputs : List (Core.Expression.Ident × Core.Expression.Ty)
@@ -122,6 +131,13 @@ structure Procedure where
   body : Option Body
   md : MD := .empty
   requires : List Precondition := []
+  /-- Whether the procedure models code that Strata does not see, such as a library method:
+  its contract is a model of that code. The lowering to Core marks every call to it
+  (`Core.externalAssumePrefix`), so a counterexample through the call is not reported as a
+  failure. A procedure that is not external, such as a primitive of the API, means exactly its
+  contract, with or without a body. -/
+  external : Bool := false
+  ensures : List Postcondition := []
 
 structure UnorderedProgram where
   composites : List CompositeDecl
@@ -135,11 +151,13 @@ structure UnorderedProgram where
   globalInit : List (Cmd Core.Expression) := []
   datatypes : List (Lambda.LDatatype Unit) := []
   opaqueTypes : List TypeConstructor := []
+  functions : List (Lambda.LFunc Core.CoreLParams) := []
   procedures : List Procedure
 
 inductive OrderedDecl where
   | datatypes (ds : List (Lambda.LDatatype Unit))
   | opaqueType (tc : TypeConstructor)
+  | function (f : Lambda.LFunc Core.CoreLParams)
   | procedure (p : Procedure)
 
 structure OrderedProgram where
@@ -216,6 +234,14 @@ where
 @[expose] def IRCmd.isVirtualCall : IRCmd → Bool
   | .virtualCall .. => true
   | _ => false
+
+@[expose] def IRCmd.md : IRCmd → MD
+  | .cmd (.init _ _ _ md) | .cmd (.set _ _ md) | .cmd (.assert _ _ md) | .cmd (.assume _ _ md)
+  | .cmd (.cover _ _ md) => md
+  | .cast _ _ _ _ md | .new _ _ md | .readField _ _ _ md | .writeField _ _ _ md | .instanceOf _ _ _ md
+  | .call _ _ _ md | .virtualCall _ _ _ _ md | .throw _ md => md
+  | .newArray _ _ _ md | .readElem _ _ _ _ md | .writeElem _ _ _ _ md | .arrayLength _ _ md
+  | .instanceOfComponent _ _ _ md => md
 
 @[expose] def UnorderedProgram.hasVirtualCall (p : UnorderedProgram) : Bool :=
   p.procedures.any fun pr => match pr.body with

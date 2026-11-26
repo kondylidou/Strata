@@ -7,6 +7,7 @@ module
 
 meta import Strata.Languages.Core
 meta import Strata.Languages.Core.Verifier
+meta import Strata.Languages.Core.Typing.Soundness.Core
 meta import Strata.Transform.CallElim
 meta import Strata.Transform.ProcedureInlining
 meta import Strata.Transform.LoopElim
@@ -37,7 +38,7 @@ private def proc (name : String) (body : List Statement)
     spec := {
       preconditions := pre.zipIdx.map fun (e, i) => (s!"{name}_requires_{i}", { expr := e })
       postconditions := post.zipIdx.map fun (e, i) => (s!"{name}_ensures_{i}", { expr := e }) }
-    body := .structured body } md
+    body := .structured body false } md
 
 /-- The verifier's results for `p` under `options`. -/
 private def verify (p : Program) (options : VerifyOptions := .quiet) : IO Core.VCResults :=
@@ -115,8 +116,8 @@ Result: ❌ fail
 
 /-! ## A callee type parameter that a call does not determine
 
-`q<a>` has no argument of type `a`, so a call to it leaves `a` open. Each call gets its own
-declared opaque type for `a`, and the program verifies. -/
+`q<a>` has no argument of type `a`, so a call to it leaves `a` open. The checker rejects the
+caller, because the call's stored type argument is not one of its type parameters. -/
 
 private def reflexive : Expression.Expr :=
   .quant Core.coreLoc .all "y" (some (.ftvar "a")) (LExpr.noTrigger Core.coreLoc)
@@ -125,42 +126,25 @@ private def reflexive : Expression.Expr :=
 private def undetermined : Program :=
   { decls := [
       proc "q" [] (typeArgs := ["a"]) (pre := [reflexive]),
-      proc "caller" [Statement.call "q" [] md, Statement.call "q" [] md]] }
+      proc "caller" [Statement.call "q" none [] md, Statement.call "q" none [] md]] }
 
 private def checkThenCallElim : List PipelinePhase :=
   [ProgramFact.assertPhase .noCFGBodies, typeCheckPipelinePhase .quiet, callElimPipelinePhase]
 
 /--
-info: program Core;
-
-type $__cety_0;
-type $__cety_2;
-procedure q<a> ()
-spec {
-  requires [q_requires_0]: forall y : (a) :: y == y;
-  } {
-  
-};
-procedure caller ()
-{
-  assert [callElimAssert_q_requires_0_1]: forall y : $__cety_0 :: y == y;
-  assert [callElimAssert_q_requires_0_3]: forall y : $__cety_2 :: y == y;
-};
+info: error: ❌ Type checking error.
+Procedure 'caller': the call to 'q' does not determine one of its type
+parameters
 -/
-#guard_msgs in
+#guard_msgs (whitespace := lax) in
 #eval transformed undetermined checkThenCallElim
 
 /--
-info:
-Obligation: callElimAssert_q_requires_0_1
-Property: assert
-Result: ✅ pass
-
-Obligation: callElimAssert_q_requires_0_3
-Property: assert
-Result: ✅ pass
+error: ❌ Type checking error.
+Procedure 'caller': the call to 'q' does not determine one of its type
+parameters
 -/
-#guard_msgs in
+#guard_msgs (whitespace := lax) in
 #eval verify undetermined
 
 /-! ## A function precondition at the caller's own type parameter
@@ -199,7 +183,7 @@ private def identity : Program :=
                   (.fvar Core.coreLoc (ident "x") none)]),
       proc "caller"
         [Statement.init (ident "z") (.forAll [] .int) .nondet md,
-         Statement.call "id" [.inArg (intConst 5), .outArg (ident "z")] md]] }
+         Statement.call "id" none [.inArg (intConst 5), .outArg (ident "z")] md]] }
 
 /--
 info: program Core;
@@ -216,7 +200,7 @@ procedure caller ()
   var tmp_arg_0 : int := 5;
   var tmp_z_1 : int := z;
   havoc z;
-  assume [callElimAssume_id_ensures_0_2]: z == tmp_arg_0;
+  assume [$__callElimAssume_id_ensures_0_2]: z == tmp_arg_0;
 };
 -/
 #guard_msgs in
@@ -237,7 +221,7 @@ private def exitingLoop (label : String) (pre : List Statement := []) : Statemen
 private def exiting : Program :=
   { decls := [
       proc "callee" [.block "b" [exitingLoop "b"] md],
-      proc "caller" [.block "c" [exitingLoop "c" [Statement.call "callee" [] md]] md]] }
+      proc "caller" [.block "c" [exitingLoop "c" [Statement.call "callee" none [] md]] md]] }
 
 /-- The phase that asserts every `exit` is inside a block that catches it. -/
 private def covered : PipelinePhase := ProgramFact.assertPhase .exitsCovered
@@ -256,6 +240,7 @@ procedure callee ()
         $__loopElim_havoc_loop_0: {
           
         }
+        assume [$__loopElimAssume_guard_loop_0]: true;
         if * {
           exit b;
         }
@@ -263,6 +248,7 @@ procedure callee ()
       $__loopElim_havoc_loop_0: {
         
       }
+      assume [$__loopElimAssume_not_guard_loop_0]: true;
     }
   }
 };
@@ -274,6 +260,7 @@ procedure caller ()
         $__loopElim_havoc_loop_1: {
           
         }
+        assume [$__loopElimAssume_guard_loop_1]: true;
         $__inline1_callee$inlined: {
           $__inline1_b: {
             if * {
@@ -281,6 +268,7 @@ procedure caller ()
                 $__loopElim_havoc_loop_2: {
                   
                 }
+                assume [$__loopElimAssume_guard_loop_2]: true;
                 if * {
                   exit $__inline1_b;
                 }
@@ -288,6 +276,7 @@ procedure caller ()
               $__loopElim_havoc_loop_2: {
                 
               }
+              assume [$__loopElimAssume_not_guard_loop_2]: true;
             }
           }
         }
@@ -298,6 +287,7 @@ procedure caller ()
       $__loopElim_havoc_loop_1: {
         
       }
+      assume [$__loopElimAssume_not_guard_loop_1]: true;
     }
   }
 };
@@ -317,6 +307,7 @@ procedure callee ()
         $__loopElim_havoc_loop_0: {
           
         }
+        assume [$__loopElimAssume_guard_loop_0]: true;
         if * {
           exit b;
         }
@@ -324,6 +315,7 @@ procedure callee ()
       $__loopElim_havoc_loop_0: {
         
       }
+      assume [$__loopElimAssume_not_guard_loop_0]: true;
     }
   }
 };
@@ -335,6 +327,7 @@ procedure caller ()
         $__loopElim_havoc_loop_1: {
           
         }
+        assume [$__loopElimAssume_guard_loop_1]: true;
         if * {
           exit c;
         }
@@ -342,6 +335,7 @@ procedure caller ()
       $__loopElim_havoc_loop_1: {
         
       }
+      assume [$__loopElimAssume_not_guard_loop_1]: true;
     }
   }
 };
@@ -376,6 +370,10 @@ bodies included. -/
 #guard match Core.typeCheck .quiet identity with
   | .ok p => (ProgramFact.wellFormedCalls.check?.get rfl) p
   | .error _ => false
+
+/-- The checker's output has only well-formed calls. -/
+example (p p' : Program) (h : Core.typeCheck .quiet p = .ok p') : p'.callsWellFormed :=
+  typeCheck_callsWellFormed .quiet p p' none Lambda.Factory.default h
 
 end VerifierPipelineTests
 

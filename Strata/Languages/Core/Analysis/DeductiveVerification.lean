@@ -45,8 +45,9 @@ the program's functions, whose run walks the declarations in order, assuming eac
 and `distinct` declaration and asserting each lemma, which it never assumes afterwards
 (`declsLang`). Its runtime factory is `base` extended with all of the declarations
 (`runtimeFactoryOf`), with any model of it. Procedure entries are the entries above
-(`IsCoreEntry`), whose factory is Core's extended with the functions declared before the
-procedure, without `base` or the functions generated for datatypes. Conditions are read
+(`IsCoreEntry`), whose factory is `runtimeFactoryOf Core.Factory` of the declarations
+before the procedure (`factoryBeforeProcedure_eq_runtimeFactoryOf`): Core's built-ins with
+the functions and the datatype functions declared before it, without `base`. Conditions are read
 under the factory and store they were captured with (`Imperative.BigStep.evalInterp`).
 `DeductiveVerificationOnCoreWith base` says results are deductive verification of a
 program over `base`: they have exactly one result for each lemma of the program
@@ -107,10 +108,12 @@ structure CoreEntry where
 @[expose] def coreStart (p : Program) (w : CoreEntry) :
     (i : Program × Bool) × (coreEventLang i).CfgT :=
   match w.proc.body with
-  | .structured ss =>
+  | .structured ss _ =>
     ⟨(p, true), (Core.Logic.EventLang.core p.findProcByString?).stmtCfg (Stmt.block "" ss #[]) w.ρ₀⟩
-  | .cfg c =>
+  | .cfg c _ =>
     ⟨(p, false), (Core.Logic.EventLang.coreCFG p.findProcByString?).stmtCfg c w.ρ₀⟩
+  | .abstract =>
+    ⟨(p, true), (Core.Logic.EventLang.core p.findProcByString?).stmtCfg (Stmt.block "" [] #[]) w.ρ₀⟩
 
 /-- `w` is an entry of `p`: it names a procedure of `p` and an environment its
     body may start from (under some `InitEnvWFParams`). -/
@@ -355,6 +358,12 @@ every model of the program's functions and axioms. -/
     Lambda.Factory CoreLParams :=
   decls.foldl Decl.addToRuntimeFactory base
 
+/-- The factory visible at a procedure's entry is the runtime factory over Core's
+    built-ins of the declarations before it. -/
+theorem factoryBeforeProcedure_eq_runtimeFactoryOf (p : Program) (n : String) :
+    p.factoryBeforeProcedure n = runtimeFactoryOf Core.Factory (p.declsBeforeProcedure n) :=
+  rfl
+
 /-! #### The declarations entry
 
 A program's declarations are read in order, as Core's program evaluator reads them: an
@@ -369,15 +378,15 @@ closed Boolean expressions (`declFormulasTyped`), one sort for a `distinct` decl
 expressions included; theorems take that per-program fact as a hypothesis
 (see `TypeCheckDeclFormulasTyped` for why they do not rely on type checking).
 
-A known divergence from `Core.verify`: this entry assumes a `distinct` declaration only for
-the lemmas after it, as the language reference states (`LangDefDoc.lean`: each lemma is
-checked under the axioms and `distinct` facts declared before it). `Core.verify` instead
-hoists every `distinct` declaration into every lemma's obligation (`Program.eval` keeps
-them apart from the path condition, and `evalProgramDecls` emits all of them ahead of the
-obligations), while axioms keep declaration order. So a lemma before a `distinct` it needs
-is reported proved, and this entry says nothing about it (`CoreEntriesTests` pins it).
-Until `Core.verify` scopes `distinct` declarations by position for lemmas, a theorem that
-reads its lemma verdicts takes `Program.distinctsBeforeLemmasB` as a hypothesis. -/
+This entry assumes a `distinct` declaration only for the lemmas after it, as the language
+reference states (`LangDefDoc.lean`: each lemma is checked under the axioms and `distinct` facts
+declared before it). `Core.verify` scopes them the same way, which tests check rather than a
+theorem (`WPAxiomScopeTest`, in both `--vcgen` modes, and `CoreEntriesTests`, which pins a lemma
+before a `distinct` it would need, not proved): `Program.eval` adds each `distinct` group to the
+top-level path condition, as it does an axiom, so each obligation records the groups declared
+before its lemma or procedure, and `toCoreProofObligationProgram` places each group before the
+obligations that record it. So a theorem that reads lemma verdicts needs no hypothesis on where
+the `distinct` declarations sit. -/
 
 /-- The condition of a declaration's event, captured in `ρ`. -/
 @[expose] def declArg (ρ : Imperative.Env Expression) (label : String) (e : Expression.Expr)
@@ -473,11 +482,10 @@ inductive CoreEntryWithDecls where
     - A procedure entry is an entry of mainline's procedure entries (`IsCoreEntry`): it
       names a procedure of `p` and an environment its body may start from
       (`ProcEntryEnv`), whose factory is Core's extended with the functions declared
-      before the procedure (`Program.factoryBeforeProcedure`). That factory has neither
-      `base` nor the functions generated for datatypes, so a body that evaluates a
-      datatype's constructor, tester or destructor gets stuck there, and deductive
-      verification says nothing about the assertions after it. Giving procedure entries
-      the runtime factory over `base` is follow-up work.
+      before the procedure and the functions generated for the datatypes declared before
+      it (`Program.factoryBeforeProcedure`). That factory is over Core's built-ins, not
+      over `base`. Giving procedure entries the runtime factory over `base` is follow-up
+      work.
     - The declarations entry starts from the empty store, with a runtime factory that is
       `base` extended with all of `p`'s declarations, and any model of it. A lemma refers
       to no variable. -/

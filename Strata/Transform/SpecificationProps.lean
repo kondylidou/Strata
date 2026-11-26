@@ -32,8 +32,10 @@ The Hoare-logic definitions and structural rules themselves live in
 `Strata.DL.Imperative.Logic.HoareTemplate`; event-trace Hoare transport across
 trace overapproximations lives in `Strata.Transform.SpecHoareConnection`:
 
-- `sound_assertValid` / `sound_allAsserts` — `Sound` transports
-  `AssertValidOnTracesWhen` and `AllAssertsValidOnTracesWhen`.
+- `assertValidityPreservedWhen_assertValid` / `assertValidityPreservedWhen_allAsserts` —
+  `AssertValidityPreservedWhen` transports `AssertValidOnTracesWhen` and
+  `AllAssertsValidOnTracesWhen`; `assertValidityPreservedWhen_single` builds it for the
+  transformation sending one statement to another.
 
 Canonical event-trace overapproximation properties.  Each is proved for
 `OverapproximatesTraces2UptoWhen`, which relates finite prefixes by `Rtrace` and completed runs
@@ -47,15 +49,33 @@ by `Rtrace_full`, and the one-relation members (`OverapproximatesTracesUptoWhen`
   for two stages sharing a transitive trace relation `R` back to the single `R`.
 - `OverapproximatesTraces2UptoWhen.mono_env` — environment-relation weakening: a finer input
   relation and a coarser output relation.
+- `OverapproximatesTracesUptoWhen.mono_out` — output-relation weakening (`Rout ⊆ Rout'`),
+  covariant.
+- `OverapproximatesTracesUptoWhen.comp_eq_right` — composition of a first stage with any
+  input relation and a second stage with equality as input relation; the trace and output
+  relations compose by `RComp`.
+- `OverapproximatesTracesUptoWhen.mono_in` — input-relation strengthening (`Rin' ⊆ Rin`),
+  contravariant.
+- `OverapproximatesTracesUptoWhen.comp_eqOn_right` — `comp_eq_right` for a second stage whose
+  input relation is equality at environments satisfying a predicate the first stage's input
+  relation gives its target environments.
+- `OverapproximatesTracesUptoWhen.iterate` — `n` applications of a phase (`iterateT`) that
+  over-approximates with reflexive and transitive trace and output relations, under a
+  precondition it preserves, over-approximate with the same relations.
 - `OverapproximatesTraces2UptoWhen.rel_comp` / `OverapproximatesTraces.rel_comp` — compose
   stages, producing the relational composition `RComp` of their relations.
 - `OverapproximatesTraces2UptoWhen.comp_trans_eq` /
   `OverapproximatesTracesUptoWhen.comp_trans_eq` — shared-start composition with
   stage-specific trace relations and a transitive output-state relation.
+- `OverapproximatesTraces2UptoWhen.of_pre_and_initEnvWF` /
+  `OverapproximatesTracesUptoWhen.of_pre_and_initEnvWF` — drop from the precondition the
+  assumption that some entry environment meets the source gate.
 - `overapproximatesTraces2UptoWhen_assertValid` / `overapproximatesTracesUptoWhen_assertValid`
   / `overapproximatesTraces_assertValid` and `overapproximatesTraces2UptoWhen_allAsserts` /
   `overapproximatesTraces_allAsserts` — transport per-identifier or whole-trace assertion
-  validity when the (prefix) trace relation reflects the corresponding predicate.
+  validity when the (prefix) trace relation reflects the corresponding predicate;
+  `overapproximatesTraces2UptoWhen_assertValidityPreservedWhen` states the per-identifier
+  transport as `AssertValidityPreservedWhen`.
 - `overapproximatesTraces2UptoWhen_stmts` / `overapproximatesTraces_stmts` — lift
   per-statement trace overapproximation to statement lists when the trace relations relate
   `[]` and respect append (the prefix relation extending on the left by the run relation).
@@ -103,48 +123,54 @@ variable {P : PureExpr} [HasFvar P] [HasFvars P] [HasOps P] [HasBool P] [HasBool
 
 namespace Transform
 
-/-! ## Connection between `Sound` and trace-native assertion validity -/
+/-! ## Connection between `AssertValidityPreservedWhen` and trace-native assertion validity -/
 
 section Connection
 omit [HasOps P] [HasBool P] [HasBoolOps P] [HasFvar P] [HasFvars P] [HasInt P] [HasIntOps P] [HasSubstFvar P]
 
-/-- Composing two sound transformations yields a sound composite under the same
-condition interpretation. -/
-theorem sound_comp (I : ConditionInterp P)
+/-- Composing two transformations that preserve assertion validity preserves it, under the same
+condition interpretation, when the first sends statements meeting its precondition to statements
+meeting the second's. -/
+theorem assertValidityPreservedWhen_comp (I : ConditionInterp P)
     (L₁ L₂ L₃ : EventLang P (Event P))
     (T₁ : L₁.StmtT → Option L₂.StmtT) (T₂ : L₂.StmtT → Option L₃.StmtT)
+    (pre₁ : L₁.StmtT → Prop) (pre₂ : L₂.StmtT → Prop)
     (params₁ : L₁.InitEnvWFParamsTy) (params₂ : L₂.InitEnvWFParamsTy)
     (params₃ : L₃.InitEnvWFParamsTy)
-    (h₁ : Sound I L₁ L₂ T₁ params₁ params₂)
-    (h₂ : Sound I L₂ L₃ T₂ params₂ params₃) :
-    Sound I L₁ L₃ (fun s => T₁ s >>= T₂) params₁ params₃ := by
-  intro s s'' a hrun hvalid
+    (hpre : ∀ s s', T₁ s = some s' → pre₁ s → pre₂ s')
+    (h₁ : AssertValidityPreservedWhen I L₁ L₂ T₁ pre₁ params₁ params₂)
+    (h₂ : AssertValidityPreservedWhen I L₂ L₃ T₂ pre₂ params₂ params₃) :
+    AssertValidityPreservedWhen I L₁ L₃ (fun s => T₁ s >>= T₂) pre₁ params₁ params₃ := by
+  intro s s'' a hrun hpre₁ hvalid
   simp only [bind, Option.bind] at hrun
   match h1 : T₁ s with
-  | some s' => rw [h1] at hrun; exact h₁ s s' a h1 (h₂ s' s'' a hrun hvalid)
+  | some s' =>
+    rw [h1] at hrun
+    exact h₁ s s' a h1 hpre₁ (h₂ s' s'' a hrun (hpre s s' h1 hpre₁) hvalid)
   | none => rw [h1] at hrun; exact absurd hrun (by nofun)
 
-/-- If `T` maps `s` to `s'`, soundness transports trace-native validity of an
-assertion identifier from `s'` back to `s`. -/
-theorem sound_assertValid (I : ConditionInterp P)
+/-- If `T` maps `s`, which satisfies `pre`, to `s'`, a transformation preserving assertion
+validity transports trace-native validity of an assertion identifier from `s'` back to `s`. -/
+theorem assertValidityPreservedWhen_assertValid (I : ConditionInterp P)
     (L₁ L₂ : EventLang P (Event P))
-    (T : L₁.StmtT → Option L₂.StmtT) (a : AssertId P)
+    (T : L₁.StmtT → Option L₂.StmtT) (pre : L₁.StmtT → Prop) (a : AssertId P)
     (params₁ : L₁.InitEnvWFParamsTy) (params₂ : L₂.InitEnvWFParamsTy)
     (s : L₁.StmtT) (s' : L₂.StmtT)
-    (ht : T s = some s') (hsound : Sound I L₁ L₂ T params₁ params₂)
+    (ht : T s = some s') (hpre : pre s)
+    (hsound : AssertValidityPreservedWhen I L₁ L₂ T pre params₁ params₂)
     (hvalid : AssertValidOnTracesWhen L₂ I
       (L₂.initEnvWF params₂ s') s' a) :
     AssertValidOnTracesWhen L₁ I (L₁.initEnvWF params₁ s) s a :=
-  hsound s s' a ht hvalid
+  hsound s s' a ht hpre hvalid
 
-/-- A sound transformation transports whole-trace validity of every assertion
-from the target statement back to the source statement. -/
-theorem sound_allAsserts (I : ConditionInterp P)
+/-- A transformation preserving assertion validity transports whole-trace validity of every
+assertion from the target statement back to a source statement satisfying its precondition. -/
+theorem assertValidityPreservedWhen_allAsserts (I : ConditionInterp P)
     (L₁ L₂ : EventLang P (Event P))
-    (T : L₁.StmtT → Option L₂.StmtT)
+    (T : L₁.StmtT → Option L₂.StmtT) (pre : L₁.StmtT → Prop)
     (params₁ : L₁.InitEnvWFParamsTy) (params₂ : L₂.InitEnvWFParamsTy)
-    (s : L₁.StmtT) (s' : L₂.StmtT) (ht : T s = some s')
-    (hsound : Sound I L₁ L₂ T params₁ params₂)
+    (s : L₁.StmtT) (s' : L₂.StmtT) (ht : T s = some s') (hpre : pre s)
+    (hsound : AssertValidityPreservedWhen I L₁ L₂ T pre params₁ params₂)
     (hvalid : AllAssertsValidOnTracesWhen L₂ I
       (L₂.initEnvWF params₂ s') s') :
     AllAssertsValidOnTracesWhen L₁ I
@@ -152,16 +178,38 @@ theorem sound_allAsserts (I : ConditionInterp P)
   intro ρ₀ cfg trace hinit htrace
   apply Trace.AssertionsValid.of_all_assertionValid I
   intro aid
-  have ha := hsound s s' aid ht (fun ρ₀' cfg' trace' hinit' htrace' =>
+  have ha := hsound s s' aid ht hpre (fun ρ₀' cfg' trace' hinit' htrace' =>
     Trace.AssertionValid.of_assertionsValid I aid
       (hvalid ρ₀' cfg' trace' hinit' htrace'))
   exact ha ρ₀ cfg trace hinit htrace
 
-/-- The identity transformation is sound for every event language and condition
-interpretation. -/
-theorem sound_id (I : ConditionInterp P) (L : EventLang P (Event P))
-    (params : L.InitEnvWFParamsTy) : Sound I L L some params params := by
-  intro s s' a ht hvalid; simp only [Option.some.injEq] at ht; subst ht; exact hvalid
+/-- The identity transformation preserves assertion validity for every event language,
+condition interpretation and precondition. -/
+theorem assertValidityPreservedWhen_id (I : ConditionInterp P) (L : EventLang P (Event P))
+    (pre : L.StmtT → Prop) (params : L.InitEnvWFParamsTy) :
+    AssertValidityPreservedWhen I L L some pre params params := by
+  intro s s' a ht _ hvalid; simp only [Option.some.injEq] at ht; subst ht; exact hvalid
+
+/-- The transformation sending only `s₀`, to `s₀'`, preserves assertion validity under `pre`
+when, for `s₀` satisfying `pre`, each assertion identifier valid on `s₀'` is valid on `s₀`.
+The equality test on statements is implicit, so that it unifies with the one a caller's
+`if s = s₀` elaborates to. -/
+theorem assertValidityPreservedWhen_single (I : ConditionInterp P)
+    {L₁ L₂ : EventLang P (Event P)} {_ : DecidableEq L₁.StmtT} {pre : L₁.StmtT → Prop}
+    {params₁ : L₁.InitEnvWFParamsTy} {params₂ : L₂.InitEnvWFParamsTy}
+    {s₀ : L₁.StmtT} {s₀' : L₂.StmtT}
+    (h : pre s₀ → ∀ a, AssertValidOnTracesWhen L₂ I (L₂.initEnvWF params₂ s₀') s₀' a →
+      AssertValidOnTracesWhen L₁ I (L₁.initEnvWF params₁ s₀) s₀ a) :
+    AssertValidityPreservedWhen I L₁ L₂ (fun s => if s = s₀ then some s₀' else none)
+      pre params₁ params₂ := by
+  intro s s' a ht hpre hvalid
+  dsimp only at ht
+  split at ht
+  · rename_i hs
+    subst hs
+    cases ht
+    exact h hpre a hvalid
+  · cases ht
 
 end Connection
 
@@ -386,6 +434,36 @@ theorem OverapproximatesTracesUptoWhen.comp_trans_eq
 
 omit [HasFvar P] [HasFvars P] [HasOps P] [HasBool P] [HasBoolOps P]
   [HasSubstFvar P] [HasInt P] [HasIntOps P] in
+/-- A statement precondition may assume that some entry environment meets the source gate:
+    the overapproximation only ever applies it to statements run from such an environment. -/
+theorem OverapproximatesTraces2UptoWhen.of_pre_and_initEnvWF
+    {EventT : Type _}
+    {Rtrace Rtrace_full : Relation (List EventT)} {Rin Rout : Relation (Env P)}
+    {L₁ L₂ : EventLang P EventT} {T : L₁.StmtT → Option L₂.StmtT} {pre : L₁.StmtT → Prop}
+    {params₁ : L₁.InitEnvWFParamsTy} {params₂ : L₂.InitEnvWFParamsTy}
+    (h : OverapproximatesTraces2UptoWhen Rtrace Rtrace_full Rin Rout L₁ L₂ T
+      (fun st => pre st ∧ ∃ ρ, L₁.initEnvWF params₁ st ρ) params₁ params₂) :
+    OverapproximatesTraces2UptoWhen Rtrace Rtrace_full Rin Rout L₁ L₂ T pre params₁ params₂ :=
+  fun st st' ht hpre ρ₀ ρ₀' hin hinit => h st st' ht ⟨hpre, ρ₀, hinit⟩ ρ₀ ρ₀' hin hinit
+
+omit [HasFvar P] [HasFvars P] [HasOps P] [HasBool P] [HasBoolOps P]
+  [HasSubstFvar P] [HasInt P] [HasIntOps P] in
+/-- A single-relation trace overapproximation whose precondition also assumes that some
+    entry environment meets the source gate is one under the precondition alone: the
+    overapproximation only applies the precondition to statements run from such an
+    environment. -/
+theorem OverapproximatesTracesUptoWhen.of_pre_and_initEnvWF
+    {EventT : Type _}
+    {Rtrace : Relation (List EventT)} {Rin Rout : Relation (Env P)}
+    {L₁ L₂ : EventLang P EventT} {T : L₁.StmtT → Option L₂.StmtT} {pre : L₁.StmtT → Prop}
+    {params₁ : L₁.InitEnvWFParamsTy} {params₂ : L₂.InitEnvWFParamsTy}
+    (h : OverapproximatesTracesUptoWhen Rtrace Rin Rout L₁ L₂ T
+      (fun st => pre st ∧ ∃ ρ, L₁.initEnvWF params₁ st ρ) params₁ params₂) :
+    OverapproximatesTracesUptoWhen Rtrace Rin Rout L₁ L₂ T pre params₁ params₂ :=
+  OverapproximatesTraces2UptoWhen.of_pre_and_initEnvWF h
+
+omit [HasFvar P] [HasFvars P] [HasOps P] [HasBool P] [HasBoolOps P]
+  [HasSubstFvar P] [HasInt P] [HasIntOps P] in
 /-- A trace overapproximation with two trace relations, equal initial environments and any
 relation `Rout` between final environments transports validity of one assertion identifier
 when its prefix relation reflects that validity.  The run relation is not used. -/
@@ -408,6 +486,26 @@ theorem overapproximatesTraces2UptoWhen_assertValid
   have hr := hover st st' ht hpre ρ₀ ρ₀ rfl hinit
   obtain ⟨cfg', trace', htrace', hrel⟩ := hr.1 cfg trace htrace
   exact hreflect trace trace' hrel aid (hvalid ρ₀ cfg' trace' hr.2.2.2 htrace')
+
+omit [HasFvar P] [HasFvars P] [HasOps P] [HasBool P] [HasBoolOps P]
+  [HasSubstFvar P] [HasInt P] [HasIntOps P] in
+/-- A trace overapproximation with two trace relations, equal initial environments and any
+relation `Rout` between final environments preserves assertion validity
+(`AssertValidityPreservedWhen`) under its precondition when its prefix relation reflects
+assertion validity. -/
+theorem overapproximatesTraces2UptoWhen_assertValidityPreservedWhen
+    (I : ConditionInterp P) {Rtrace Rtrace_full : Relation (Trace P)}
+    {Rout : Relation (Env P)}
+    {L₁ L₂ : EventLang P (Event P)} {T : L₁.StmtT → Option L₂.StmtT}
+    {pre : L₁.StmtT → Prop}
+    {params₁ : L₁.InitEnvWFParamsTy} {params₂ : L₂.InitEnvWFParamsTy}
+    (hreflect : ∀ trace trace', Rtrace trace trace' → ∀ aid,
+      Trace.AssertionValid P I aid trace' → Trace.AssertionValid P I aid trace)
+    (hover : OverapproximatesTraces2UptoWhen Rtrace Rtrace_full (· = ·) Rout L₁ L₂ T pre
+      params₁ params₂) :
+    AssertValidityPreservedWhen I L₁ L₂ T pre params₁ params₂ :=
+  fun _ _ _ ht hpre hvalid =>
+    overapproximatesTraces2UptoWhen_assertValid I hreflect hover ht hpre hvalid
 
 omit [HasFvar P] [HasFvars P] [HasOps P] [HasBool P] [HasBoolOps P]
   [HasSubstFvar P] [HasInt P] [HasIntOps P] in
@@ -493,6 +591,124 @@ theorem overapproximatesTraces_allAsserts
     AllAssertsValidOnTracesWhen L₁ I
       (L₁.initEnvWF params₁ st) st :=
   overapproximatesTraces2UptoWhen_allAsserts I hreflect hover ht hpre hvalid
+
+omit [HasFvar P] [HasFvars P] [HasOps P] [HasBool P] [HasBoolOps P]
+  [HasSubstFvar P] [HasInt P] [HasIntOps P] in
+/-- Output-relation weakening.  `Rout` occurs only covariantly in
+`OverapproximatesTracesUptoWhen` (it relates the source's final environment to the matched
+target's), so replacing it by any coarser relation `Rout'` (with `Rout ⊆ Rout'`) preserves the
+overapproximation. -/
+theorem OverapproximatesTracesUptoWhen.mono_out
+    {EventT : Type _}
+    {Rtrace : Relation (List EventT)} {Rin Rout Rout' : Relation (Env P)}
+    {L₁ L₂ : EventLang P EventT} {T : L₁.StmtT → Option L₂.StmtT}
+    {pre : L₁.StmtT → Prop}
+    {params₁ : L₁.InitEnvWFParamsTy} {params₂ : L₂.InitEnvWFParamsTy}
+    (hsub : ∀ ρ ρ', Rout ρ ρ' → Rout' ρ ρ')
+    (h : OverapproximatesTracesUptoWhen Rtrace Rin Rout L₁ L₂ T pre params₁ params₂) :
+    OverapproximatesTracesUptoWhen Rtrace Rin Rout' L₁ L₂ T pre params₁ params₂ :=
+  OverapproximatesTraces2UptoWhen.mono_env (fun _ _ h => h) hsub h
+
+omit [HasFvar P] [HasFvars P] [HasOps P] [HasBool P] [HasBoolOps P]
+  [HasSubstFvar P] [HasInt P] [HasIntOps P] in
+/-- Composition with a second phase whose input relation is equality.  The first phase relates
+the initial environments by any `Rin`; the second starts from the first's target environment.
+The composite relates traces by the composition of the trace relations and final environments by
+the composition of the output relations, under the first phase's precondition, when the first
+phase's output satisfies the second's precondition. -/
+theorem OverapproximatesTracesUptoWhen.comp_eq_right
+    {EventT : Type _}
+    {Rtrace₁ Rtrace₂ : Relation (List EventT)} {Rin Rout₁ Rout₂ : Relation (Env P)}
+    {L₁ L₂ L₃ : EventLang P EventT}
+    {T₁ : L₁.StmtT → Option L₂.StmtT} {T₂ : L₂.StmtT → Option L₃.StmtT}
+    {pre₁ : L₁.StmtT → Prop} {pre₂ : L₂.StmtT → Prop}
+    {params₁ : L₁.InitEnvWFParamsTy} {params₂ : L₂.InitEnvWFParamsTy}
+    {params₃ : L₃.InitEnvWFParamsTy}
+    (hpre : ∀ st st', T₁ st = some st' → pre₁ st → pre₂ st')
+    (h₁ : OverapproximatesTracesUptoWhen Rtrace₁ Rin Rout₁ L₁ L₂ T₁ pre₁ params₁ params₂)
+    (h₂ : OverapproximatesTracesUptoWhen Rtrace₂ (· = ·) Rout₂ L₂ L₃ T₂ pre₂ params₂ params₃) :
+    OverapproximatesTracesUptoWhen (RComp Rtrace₁ Rtrace₂) Rin (RComp Rout₁ Rout₂)
+      L₁ L₃ (fun s => T₁ s >>= T₂) pre₁ params₁ params₃ :=
+  (OverapproximatesTraces2UptoWhen.rel_comp hpre h₁ h₂).mono_env (fun _ ρ' h => ⟨ρ', h, rfl⟩)
+    fun _ _ h => h
+
+omit [HasFvar P] [HasFvars P] [HasOps P] [HasBool P] [HasBoolOps P]
+  [HasSubstFvar P] [HasInt P] [HasIntOps P] in
+/-- Input-relation strengthening.  `Rin` occurs only contravariantly in
+`OverapproximatesTracesUptoWhen` (it is a hypothesis on the two initial environments), so
+replacing it by any finer relation `Rin'` (with `Rin' ⊆ Rin`) preserves the
+overapproximation. -/
+theorem OverapproximatesTracesUptoWhen.mono_in
+    {EventT : Type _}
+    {Rtrace : Relation (List EventT)} {Rin Rin' Rout : Relation (Env P)}
+    {L₁ L₂ : EventLang P EventT} {T : L₁.StmtT → Option L₂.StmtT}
+    {pre : L₁.StmtT → Prop}
+    {params₁ : L₁.InitEnvWFParamsTy} {params₂ : L₂.InitEnvWFParamsTy}
+    (hsub : ∀ ρ ρ', Rin' ρ ρ' → Rin ρ ρ')
+    (h : OverapproximatesTracesUptoWhen Rtrace Rin Rout L₁ L₂ T pre params₁ params₂) :
+    OverapproximatesTracesUptoWhen Rtrace Rin' Rout L₁ L₂ T pre params₁ params₂ :=
+  OverapproximatesTraces2UptoWhen.mono_env hsub (fun _ _ h => h) h
+
+omit [HasFvar P] [HasFvars P] [HasOps P] [HasBool P] [HasBoolOps P]
+  [HasSubstFvar P] [HasInt P] [HasIntOps P] in
+/-- Composition with a second phase whose input relation is equality at environments satisfying
+`Q`.  The first phase relates the initial environments by any `Rin` whose target environments
+satisfy `Q`; the second starts from the first's target environment.  The composite relates
+traces by the composition of the trace relations and final environments by the composition of
+the output relations, under the first phase's precondition, when the first phase's output
+satisfies the second's precondition. -/
+theorem OverapproximatesTracesUptoWhen.comp_eqOn_right
+    {EventT : Type _}
+    {Rtrace₁ Rtrace₂ : Relation (List EventT)} {Rin Rout₁ Rout₂ : Relation (Env P)}
+    {Q : Env P → Prop}
+    {L₁ L₂ L₃ : EventLang P EventT}
+    {T₁ : L₁.StmtT → Option L₂.StmtT} {T₂ : L₂.StmtT → Option L₃.StmtT}
+    {pre₁ : L₁.StmtT → Prop} {pre₂ : L₂.StmtT → Prop}
+    {params₁ : L₁.InitEnvWFParamsTy} {params₂ : L₂.InitEnvWFParamsTy}
+    {params₃ : L₃.InitEnvWFParamsTy}
+    (hQ : ∀ ρ ρ', Rin ρ ρ' → Q ρ')
+    (hpre : ∀ st st', T₁ st = some st' → pre₁ st → pre₂ st')
+    (h₁ : OverapproximatesTracesUptoWhen Rtrace₁ Rin Rout₁ L₁ L₂ T₁ pre₁ params₁ params₂)
+    (h₂ : OverapproximatesTracesUptoWhen Rtrace₂ (fun ρ ρ' => ρ = ρ' ∧ Q ρ) Rout₂ L₂ L₃ T₂ pre₂
+      params₂ params₃) :
+    OverapproximatesTracesUptoWhen (RComp Rtrace₁ Rtrace₂) Rin (RComp Rout₁ Rout₂)
+      L₁ L₃ (fun s => T₁ s >>= T₂) pre₁ params₁ params₃ :=
+  (OverapproximatesTraces2UptoWhen.rel_comp hpre h₁ h₂).mono_env
+    (fun _ ρ' h => ⟨ρ', h, rfl, hQ _ _ h⟩) fun _ _ h => h
+
+/-- `n` applications of the partial transformation `T`, stopping at the first failure. -/
+@[expose] def iterateT {α : Type _} (T : α → Option α) : Nat → α → Option α
+  | 0, a => some a
+  | n + 1, a => T a >>= iterateT T n
+
+omit [HasFvar P] [HasFvars P] [HasOps P] [HasBool P] [HasBoolOps P]
+  [HasSubstFvar P] [HasInt P] [HasIntOps P] in
+/-- **Iterating an over-approximating phase over-approximates.**  Let `T` over-approximate the
+traces of its input from equal initial environments satisfying `Q`, with the trace relation
+`Rtrace` and the output relation `Rout`, under a precondition `pre` that `T` preserves.  When
+`Rtrace` and `Rout` are reflexive and transitive, every number `n` of applications of `T`
+(`iterateT T n`) over-approximates with the same relations. -/
+theorem OverapproximatesTracesUptoWhen.iterate
+    {EventT : Type _}
+    {Rtrace : Relation (List EventT)} {Rout : Relation (Env P)} {Q : Env P → Prop}
+    {L : EventLang P EventT} {T : L.StmtT → Option L.StmtT} {pre : L.StmtT → Prop}
+    {params : L.InitEnvWFParamsTy}
+    (htr : ∀ t, Rtrace t t) (htt : ∀ t₁ t₂ t₃, Rtrace t₁ t₂ → Rtrace t₂ t₃ → Rtrace t₁ t₃)
+    (hor : ∀ ρ, Rout ρ ρ) (hot : IsTransitive Rout)
+    (hpre : ∀ st st', T st = some st' → pre st → pre st')
+    (h : OverapproximatesTracesUptoWhen Rtrace (fun ρ ρ' => ρ = ρ' ∧ Q ρ) Rout L L T pre
+      params params) (n : Nat) :
+    OverapproximatesTracesUptoWhen Rtrace (fun ρ ρ' => ρ = ρ' ∧ Q ρ) Rout L L (iterateT T n) pre
+      params params := by
+  induction n with
+  | zero =>
+    exact (OverapproximatesTraces2UptoWhen.id htr htr L pre params).mono_env (fun _ _ h => h.1)
+      fun ρ ρ' (h : ρ = ρ') => h ▸ hor ρ
+  | succ n ih =>
+    have htc : ∀ t t', RComp Rtrace Rtrace t t' → Rtrace t t' := fun _ _ ⟨_, h₁, h₂⟩ =>
+      htt _ _ _ h₁ h₂
+    refine (OverapproximatesTraces2UptoWhen.rel_comp hpre h ih).mono_trace htc htc |>.mono_env
+      (fun ρ _ ⟨he, hq⟩ => ⟨ρ, ⟨rfl, hq⟩, he, hq⟩) fun _ _ ⟨_, h₁, h₂⟩ => hot _ _ _ h₁ h₂
 
 /-- `EnvStoreAgree` is transitive: store agreement composes across a middle
 environment. -/

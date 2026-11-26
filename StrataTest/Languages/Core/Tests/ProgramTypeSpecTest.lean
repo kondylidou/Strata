@@ -105,13 +105,13 @@ private def procAt (t : String) : Procedure :=
               postconditions :=
                 [("post", { expr := .eq Core.valueLoc (xAt t) (xAt t) })] },
     body := .structured
-      [Statement.init ⟨"y", ()⟩ (.forAll [] (.ftvar t)) .nondet .empty] }
+      [Statement.init ⟨"y", ()⟩ (.forAll [] (.ftvar t)) .nondet .empty] false }
 
 /-- Renaming `$__ty0` to `a` renames it in the type parameters, the input and
     output types, the annotations of both conditions and the declared type of
     the structured body's variable. -/
 example : (procAt "$__ty0").renameTypeArgs ren0 = procAt "a" := by
-  simp [Procedure.renameTypeArgs, procAt, xAt, ren0, renameTyArgList,
+  simp [Procedure.renameTypeArgs, Procedure.mapTys, procAt, xAt, ren0, renameTyArgList,
     mapExprTys, mapStmtsTys_cons, mapStmtsTys_nil, mapStmtTys_cmd, mapCmdTys, mapCmdWith,
     mapLTyTys, ExprOrNondet.map, LExpr.replaceUserProvidedType, subst_ren0]
 
@@ -133,7 +133,7 @@ private theorem idAt_rename :
 /-- `f<a>(x : a) : a := x` satisfies the typechecker spec for functions in the
     empty type scope, when `x` is not a function of `C`. -/
 private theorem idAt_a_hasType {C : LContext CoreLParams}
-    (hx : "x" ∉ C.functions) : FuncHasType' C {} (idAt "a") := by
+    (hx : "x" ∉ C.functions) : FuncHasTypeExact C {} (idAt "a") := by
   have hfv : LMonoTy.freeVars
       (LMonoTy.mkArrow' (idAt "a").output (idAt "a").inputs.values) =
         ["a", "a"] := by rfl

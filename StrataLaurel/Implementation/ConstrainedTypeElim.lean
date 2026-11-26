@@ -21,7 +21,8 @@ A Laurel-to-Laurel pass that eliminates constrained types by:
 2. Adding `requires constraintProc(param)` for constrained-typed inputs
 3. Adding `ensures constraintProc(result)` for constrained-typed outputs
 4. Inserting `assert constraintProc(var)` for local variable init and reassignment
-5. Assuming the constraint for uninitialized constrained-typed variables (havoc + assume) and holes
+5. Assuming the constraint for uninitialized constrained-typed variables (havoc + assume) and holes,
+   and passing each deterministic hole of a constrained type through `$fromHole_T`
 6. Adding a synthetic witness-validation procedure per constrained type
 7. Injecting constraint procedure calls into quantifier bodies (`forall` → `==>`, `exists` → `&&`)
 8. Resolving all constrained type references to their base types
@@ -132,7 +133,7 @@ def mkConstraintProc (ptMap : ConstrainedTypeMap) (ct : ConstrainedType) : Proce
         { val := .Call none (mkId Operation.AndThen.procName) [parentCall, ct.constraint] [], source := src }
       else ct.constraint
     | _ => ct.constraint
-  { name := mkId s!"{ct.name.text}$constraint"
+  { name := { mkId s!"{ct.name.text}$constraint" with source := ct.name.source }
     inputs := [{ name := ct.valueName, type := baseType }]
     outputs := [{ name := mkId resultOutputName, type := { val := .TBool, source := src } }]
     body := .Transparent { val := .Block [
@@ -140,6 +141,54 @@ def mkConstraintProc (ptMap : ConstrainedTypeMap) (ct : ConstrainedType) : Proce
       { val := .Return [], source := src }] none [] none, source := src }
     decreases := none
     preconditions := [] }
+
+/-- The name of the procedure through which a deterministic hole of the constrained type `name`
+    yields its value. -/
+def fromHoleProcName (name : Identifier) : Identifier := mkId s!"$fromHole_{name.text}"
+
+/-- The constrained type `T` of a hole annotated with `T` itself, when `T` has a checked (not
+    free) constraint. A hole whose type only nests a constrained type, as `Option<nat>`, is a value
+    of the base type, as a binding nested in another type is. -/
+def constrainedHoleType? (cx : CteCtx) (ty : Option HighTypeMd) : Option Identifier :=
+  match ty.map (·.val) with
+  | some (HighType.UserDefined name) =>
+    match cx.ptMap.get? name.text with
+    | some ct => if ct.free then none else some name
+    | none => none
+  | _ => none
+
+/-- The names of the constrained types of the deterministic holes of `program`. -/
+def constrainedHoleTypes (cx : CteCtx) (program : LaurelProgram) : List Identifier :=
+  let collect (e : StmtExprMd) : StateM (List Identifier) StmtExprMd := do
+    if let .Hole true ty := e.val then
+      if let some name := constrainedHoleType? cx ty then
+        modify fun ns => if ns.any (·.text == name.text) then ns else ns ++ [name]
+    pure e
+  ((mapLaurelProgramStmtExprM collect program).run []).2
+
+/-- For a constrained type `T` with witness `W`, the transparent procedure
+    `$fromHole_T(x) returns (r) { if T$constraint(x) then r := x else r := W }`. A deterministic
+    hole of type `T` is `$fromHole_T` applied to a hole of the base type, which hole elimination
+    replaces by a call to a fresh uninterpreted procedure of the enclosing inputs. When `W`
+    satisfies the constraint, the values of `$fromHole_T` are exactly the values of `T`, so the
+    hole is still an arbitrary function of the enclosing inputs, now into `T`. The body is a
+    definition, not an assumption: it is consistent even for an empty `T`, whose failing witness
+    `$witness_T` reports. Being transparent, it gives the constraint both at an imperative call and
+    where the hole is read as a function (`$fromHole_T$asFunction`), as in a loop invariant, a
+    quantifier or a transparent body. -/
+def mkFromHoleProc (cx : CteCtx) (name : Identifier) : Option Procedure := do
+  let ct ← cx.ptMap.get? name.text
+  let src := name.source
+  let x := mkId "x"
+  let r := mkId "r"
+  let check ← constraintCallFor cx (.UserDefined name) x (src := src) (only := some false)
+  let assign (v : StmtExprMd) : StmtExprMd := ⟨.Assign [⟨.Local r, src⟩] v, src⟩
+  let base := resolveType cx.ptMap ct.base
+  pure { name := fromHoleProcName name, typeArgs := [], inputs := [{ name := x, type := base }]
+         outputs := [{ name := r, type := base }]
+         body := .Transparent ⟨.Block [⟨.IfThenElse check (assign ⟨.Var (.Local x), src⟩)
+           (some (assign ct.witness)), src⟩] none [] none, src⟩
+         preconditions := [], decreases := none }
 
 def resolveVariable (ptMap : ConstrainedTypeMap) (v : VariableMd) : VariableMd :=
   match v.val with
@@ -181,7 +230,14 @@ def resolveExprNode (cx : CteCtx) (expr : StmtExprMd) : StmtExprMd :=
   -- `Resolution.Check.holeNone` records the expected type on an untyped hole in check
   -- position. Resolve that annotation together with the surrounding declaration so no
   -- constrained type remains after this pass. This applies to both hole kinds.
-  | .Hole det ty => ⟨.Hole det (ty.map (resolveType cx.ptMap ·)), source⟩
+  -- A deterministic hole of a constrained type `T` whose constraint is checked becomes
+  -- `$fromHole_T(<hole of the base type>)` (see `mkFromHoleProc`), except in a witness procedure
+  -- (`cx.assumes` off), which presumes nothing of the type it is to inhabit.
+  | .Hole det ty =>
+    let hole : StmtExprMd := ⟨.Hole det (ty.map (resolveType cx.ptMap ·)), source⟩
+    match det && cx.assumes, constrainedHoleType? cx ty with
+    | true, some name => ⟨.Call none (fromHoleProcName name) [hole] [], source⟩
+    | _, _ => hole
   | _ => expr
 
 /-- Per-node constrained-type elimination, applied bottom-up (with flattening)
@@ -357,7 +413,7 @@ private def mkWitnessProc (cx : CteCtx) (ct : ConstrainedType) : Procedure :=
       (⟨.Assume ·, src⟩)
   let assert : StmtExprMd :=
     ⟨.Assert (constraintCallFor cx (.UserDefined ct.name) witnessId (src := src)).get! none, src⟩
-  { name := mkId s!"$witness_{ct.name.text}"
+  { name := { mkId s!"$witness_{ct.name.text}" with source := ct.name.source }
     inputs := []
     outputs := []
     body := .Opaque [] (some ⟨.Block ([witnessInit] ++ assumeBase ++ [assert]) none [] none, src⟩) []
@@ -445,7 +501,7 @@ private def mkHeapFieldConstraintProc (cx : CteCtx) (f : HeapField) : Option Pro
   let refName : Identifier := mkId "$r"
   let fieldRead : StmtExprMd := ⟨.Var (.Field ⟨.Var (.Local refName), src⟩ f.name), src⟩
   (constraintCallForExpr cx f.type.val fieldRead (src := src) (only := some false)).map fun constraint =>
-    { name := mkId s!"$fieldConstraint_{f.name.text.replace "." "$"}"
+    { name := { mkId s!"$fieldConstraint_{f.name.text.replace "." "$"}" with source := src }
       inputs := [{ name := refName, type := ⟨.TInt, src⟩ }]
       outputs := []
       body := .Opaque [{ condition := constraint }] none []
@@ -535,9 +591,13 @@ public def constrainedTypeElim (model : SemanticModel) (program : LaurelProgram)
       | other => some other }
   -- The witness procedures are already eliminated, assuming nothing; the map would assume.
   -- The type walk comes last: a quantifier's constraint is injected from its binder's type.
+  let fromHoleProcedures := (constrainedHoleTypes cx eliminated).filterMap (mkFromHoleProc cx)
   (mapLaurelProgramHighTypes (resolveType ptMap) <| mapLaurelProgramStmtExpr (resolveExprNode cx)
     { eliminated with staticProcedures :=
-        eliminated.staticProcedures ++ witnessProcedures ++ fieldAxiomProcedures ++ downcastProcedures },
+        eliminated.staticProcedures
+          ++ witnessProcedures.map (fun proc => Id.run (mapProcedureM
+            (mapStmtExprM (m := Id) (resolveExprNode { cx with assumes := false })) proc))
+          ++ fieldAxiomProcedures ++ downcastProcedures ++ fromHoleProcedures },
    [])
 
 /-- Pipeline pass: constrained type elimination. -/

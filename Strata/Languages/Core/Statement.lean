@@ -56,9 +56,9 @@ abbrev Statement.assert (label : String) (b : Expression.Expr) (md : MetaData Ex
 abbrev Statement.assume (label : String) (b : Expression.Expr) (md : MetaData Expression) :=
   @Stmt.cmd Expression Command (CmdExt.cmd (Cmd.assume label b md))
 @[match_pattern]
-abbrev Statement.call (pname : String) (args : List (CallArg Expression))
-    (md : MetaData Expression) :=
-  @Stmt.cmd Expression Command (CmdExt.call pname args md)
+abbrev Statement.call (pname : String) (tyArgs : Option (List Expression.Ty))
+    (args : List (CallArg Expression)) (md : MetaData Expression) :=
+  @Stmt.cmd Expression Command (CmdExt.call pname tyArgs args md)
 @[match_pattern]
 abbrev Statement.cover (label : String) (b : Expression.Expr) (md : MetaData Expression) :=
   @Stmt.cmd Expression Command (CmdExt.cmd (Cmd.cover label b md))
@@ -81,8 +81,8 @@ def Command.eraseTypes (c : Command) : Command :=
     | .assert label b md => .cmd $ .assert label b.eraseTypes md
     | .assume label b md => .cmd $ .assume label b.eraseTypes md
     | .cover label b md => .cmd $ .cover label b.eraseTypes md
-  | .call pname args md =>
-    .call pname (args.map fun
+  | .call pname _ args md =>
+    .call pname none (args.map fun
       | .inArg e => .inArg (Lambda.LExpr.eraseTypes e)
       | .inoutArg id => .inoutArg id
       | .outArg id => .outArg id) md
@@ -198,8 +198,8 @@ def Statement.substFvar (s : Core.Statement)
     .assume lbl (Lambda.LExpr.substFvar b fr to) metadata
   | .cover lbl b metadata =>
     .cover lbl (Lambda.LExpr.substFvar b fr to) metadata
-  | .call pname args metadata =>
-    .call pname (args.map fun
+  | .call pname tyArgs args metadata =>
+    .call pname tyArgs (args.map fun
       | .inArg e => .inArg (Lambda.LExpr.substFvar e fr to)
       | .inoutArg id => .inoutArg id
       | .outArg id => .outArg id) metadata
@@ -234,8 +234,8 @@ def Statement.renameLhs (s : Core.Statement)
     .init (if lhs.name == fr then to else lhs) ty rhs metadata
   | .set lhs rhs metadata =>
     .set (if lhs.name == fr then to else lhs) rhs metadata
-  | .call pname args metadata =>
-    .call pname (args.map fun
+  | .call pname tyArgs args metadata =>
+    .call pname tyArgs (args.map fun
       | .inArg e => .inArg e
       | .inoutArg l => .inoutArg (if l.name == fr then to else l)
       | .outArg l => .outArg (if l.name == fr then to else l)) metadata
@@ -259,8 +259,25 @@ def Command.mapExpr (f : Expression.Expr → Expression.Expr) : Command → Comm
   | .cmd (.cover l e md) => .cmd (.cover l (f e) md)
   | .cmd (.init n ty (.det e) md) => .cmd (.init n ty (.det (f e)) md)
   | .cmd (.set n (.det e) md) => .cmd (.set n (.det (f e)) md)
-  | .call pname args md => .call pname (args.map (CallArg.mapInput f)) md
+  | .call pname tyArgs args md => .call pname tyArgs (args.map (CallArg.mapInput f)) md
   | c => c
+
+/-- Erase every annotation of a command: expression types, the declared type of `init` and the
+    type arguments of a `call`. -/
+def Command.eraseAnnots (c : Command) : Command :=
+  Command.mapExpr Lambda.LExpr.eraseTypes
+    (match c with
+      | .cmd (.init name _ e md) => .cmd (.init name Lambda.LTy.erased e md)
+      | .call pname _ args md => .call pname none args md
+      | c => c)
+
+/-- Erase every annotation of a statement, including guards, measures and invariants. -/
+def Statement.eraseAnnots (s : Statement) : Statement :=
+  Imperative.Stmt.mapExpr Lambda.LExpr.eraseTypes Command.eraseAnnots s
+
+/-- Erase every annotation of a list of statements. -/
+def Statements.eraseAnnots (ss : Statements) : Statements :=
+  Imperative.Block.mapExpr Lambda.LExpr.eraseTypes Command.eraseAnnots ss
 
 /-- Apply a function to all user-facing expressions in a statement. -/
 def Statement.mapExprs (f : Expression.Expr → Expression.Expr) (s : Statement) : Statement :=
@@ -278,8 +295,8 @@ def Command.mapExprM {M : Type → Type} [Monad M] (f : Expression.Expr → M Ex
   | .cmd (.cover l e md) => do return .cmd (.cover l (← f e) md)
   | .cmd (.init n ty (.det e) md) => do return .cmd (.init n ty (.det (← f e)) md)
   | .cmd (.set n (.det e) md) => do return .cmd (.set n (.det (← f e)) md)
-  | .call pname args md => do
-    return .call pname (← args.mapM fun
+  | .call pname tyArgs args md => do
+    return .call pname tyArgs (← args.mapM fun
       | .inArg e => do return .inArg (← f e)
       | a => pure a) md
   | c => pure c
@@ -296,7 +313,8 @@ section TypeAnnotations
 
 open Lambda
 
-/-- Apply `fe` to every expression of a command and `ft` to the declared type of an `init`. -/
+/-- Apply `fe` to every expression of a command and `ft` to the declared type of an `init`
+    and to the type arguments of a `call`. -/
 def mapCmdWith (fe : Expression.Expr → Expression.Expr) (ft : LMonoTy → LMonoTy)
     (c : Command) : Command :=
   match c with
@@ -307,7 +325,8 @@ def mapCmdWith (fe : Expression.Expr → Expression.Expr) (ft : LMonoTy → LMon
     | .assert l b md => .cmd (.assert l (fe b) md)
     | .assume l b md => .cmd (.assume l (fe b) md)
     | .cover l b md => .cmd (.cover l (fe b) md)
-  | .call pname args md => .call pname (args.map (CallArg.mapInput fe)) md
+  | .call pname tyArgs args md =>
+    .call pname (tyArgs.map (·.map (mapLTyTys ft))) (args.map (CallArg.mapInput fe)) md
 
 /-- Apply `f` to every type annotation in a command. -/
 def mapCmdTys (f : LMonoTy → LMonoTy) (c : Command) : Command :=
@@ -338,8 +357,8 @@ def allCmdTys (p : LMonoTy → Bool) (c : Command) : Bool :=
     | .assert _ b _ => allExprTys p b
     | .assume _ b _ => allExprTys p b
     | .cover _ b _ => allExprTys p b
-  | .call _ args _ =>
-    args.all fun
+  | .call _ tyArgs args _ =>
+    tyArgs.all (·.all (allLTyTys p)) && args.all fun
       | .inArg e => allExprTys p e
       | .inoutArg _ => true
       | .outArg _ => true
@@ -364,10 +383,41 @@ def allStmtsTys (p : LMonoTy → Bool) (ss : List Statement) : Bool :=
   | s :: rest => allStmtTys p s && allStmtsTys p rest
 end
 
+mutual
+
+/-- Every type an `init` in the statement declares a variable at, and every type argument a
+    call in it carries, satisfies `p`. -/
+@[expose] def Statement.AllDeclTys (p : LTy → Prop) : Statement → Prop
+  | .cmd (.cmd (.init _ ty _ _)) => p ty
+  | .cmd (.cmd _) => True
+  | .cmd (.call _ tyArgs _ _) => ∀ tys, tyArgs = some tys → ∀ ty ∈ tys, p ty
+  | .block _ body _ => Statements.AllDeclTys p body
+  | .ite _ thenb elseb _ => Statements.AllDeclTys p thenb ∧ Statements.AllDeclTys p elseb
+  | .loop _ _ _ body _ => Statements.AllDeclTys p body
+  | .exit _ _ => True
+  | .typeDecl _ _ => True
+
+/-- Every statement of the list satisfies `Statement.AllDeclTys p`. -/
+@[expose] def Statements.AllDeclTys (p : LTy → Prop) : List Statement → Prop
+  | [] => True
+  | s :: ss => Statement.AllDeclTys p s ∧ Statements.AllDeclTys p ss
+
+end
+
+/-- Every `init` in the statement declares a ground monotype, and every call that carries type
+    arguments carries ground monotypes. -/
+@[expose] def Statement.Ground (s : Statement) : Prop :=
+  Statement.AllDeclTys LTy.GroundMono s
+
+/-- Every statement of the list is ground (`Statement.Ground`). -/
+@[expose] def Statements.Ground (ss : List Statement) : Prop :=
+  Statements.AllDeclTys LTy.GroundMono ss
+
 /-! ## Collectors over commands and statements
 
 Each collector lists, in syntax order, what `fe` gives for the expressions of a command or
-statement and what `ft` gives for the declared types of its `init`s. -/
+statement and what `ft` gives for the declared types of its `init`s and the type arguments of its
+calls. -/
 
 namespace Statement
 
@@ -380,7 +430,13 @@ def loopExprs (guard : ExprOrNondet Expression) (measure : Option Expression.Exp
 def cmdExprs (c : Command) : List Expression.Expr :=
   match c with
   | .cmd c => c.readExprs
-  | .call _ args _ => CallArg.getInputExprs args
+  | .call _ _ args _ => CallArg.getInputExprs args
+
+/-- The type arguments a command stores: those of a type-annotated call, and none otherwise. -/
+def cmdTyArgs (c : Command) : List Expression.Ty :=
+  match c with
+  | .call _ tyArgs _ _ => tyArgs.getD []
+  | .cmd _ => []
 
 end Statement
 
@@ -388,10 +444,11 @@ section Collect
 
 variable {β : Type} (fe : Expression.Expr → List β) (ft : LMonoTy → List β)
 
-/-- What `fe` and `ft` collect from a command: `ft` of a declared variable type, then `fe` of
-    each expression the command reads. -/
+/-- What `fe` and `ft` collect from a command: `ft` of a declared variable type, then `ft` of
+    each type argument of a call, then `fe` of each expression the command reads. -/
 def cmdCollect (c : Command) : List β :=
   (CmdExt.initTypes c).flatMap (fun ty => ft ty.toMonoTypeUnsafe) ++
+    (Statement.cmdTyArgs c).flatMap (fun ty => ft ty.toMonoTypeUnsafe) ++
     (Statement.cmdExprs c).flatMap fe
 
 /-- What `fe` and `ft` collect from `s` itself, outside any statement list nested in `s`. -/
@@ -418,6 +475,21 @@ end
 
 end Collect
 
+mutual
+/-- The commands of a statement and of the statement lists nested in it, in order. -/
+def stmtCmds (s : Statement) : List Command :=
+  match s with
+  | .cmd c => [c]
+  | .block _ bss _ | .loop _ _ _ bss _ => stmtsCmds bss
+  | .ite _ tss ess _ => stmtsCmds tss ++ stmtsCmds ess
+  | .exit _ _ | .typeDecl _ _ => []
+/-- The commands of a list of statements, in order. -/
+def stmtsCmds (ss : List Statement) : List Command :=
+  match ss with
+  | [] => []
+  | s :: rest => stmtCmds s ++ stmtsCmds rest
+end
+
 end TypeAnnotations
 
 /-- Push `e`'s expression onto `acc`, if it has one. -/
@@ -441,7 +513,7 @@ def Statement.collectExprsInto (acc : Array Expression.Expr) (s : Statement) :
   | .cmd (.cmd (.cover _ e _)) => acc.push e
   | .cmd (.cmd (.init _ _ e _)) => pushExprOrNondet acc e
   | .cmd (.cmd (.set _ e _)) => pushExprOrNondet acc e
-  | .cmd (.call _ args _) => args.foldl (fun acc a => match a with
+  | .cmd (.call _ _ args _) => args.foldl (fun acc a => match a with
       | .inArg e => acc.push e
       | _ => acc) acc
   | .block _ ss _ => Statements.collectExprsInto acc ss
@@ -489,6 +561,13 @@ directly; what is left here is what genuinely mentions a Core command. -/
 /-- Does `s` make no procedure call, at any nesting depth? -/
 @[expose] def Statement.noCalls (s : Statement) : Bool :=
   Imperative.Stmt.allSubstmts Statement.isNotCall s
+
+/-- The commands of a list of statements, in order; other statements are
+    dropped. -/
+def Statements.commands (ss : Statements) : List Command :=
+  ss.filterMap fun s => match s with
+    | .cmd c => some c
+    | _ => none
 
 /-- Does `ss` make no procedure call, at any nesting depth? -/
 @[expose] def Statements.noCalls (ss : Statements) : Bool :=
@@ -556,19 +635,32 @@ facts. -/
 @[expose] def Statements.allExprs (ss : Statements) : List Expression.Expr :=
   Statements.collectExprs ss
 
+/-- The variable names `ss` reads (its expressions' free variables) or declares. -/
+def Statements.varNames (ss : Statements) : List String :=
+  (Statements.allExprs ss).flatMap (fun e => (HasFvars.getFvars e).map (·.name)) ++
+    (Imperative.Block.definedVars (P := Expression) (C := Command) ss false).map (·.name)
+
+/-- `ss` with variable `x` renamed to `x'`, which has type `ty`, in its reads and
+    its writes. -/
+def Statements.renameVar (ss : Statements) (x x' : Expression.Ident)
+    (ty : Option Lambda.LMonoTy) : Statements :=
+  Block.renameLhs (Block.substFvar ss x (.fvar default x' ty)) x x'
+
 ---------------------------------------------------------------------
 
 /-! ## The calls of statements -/
 
-/-- A call: the callee's name, the arguments and the call's metadata. -/
+/-- A call: the callee's name, its type arguments, the arguments and the call's
+    metadata. -/
 structure CallSite where
   procName : String
+  tyArgs : Option (List Expression.Ty)
   args : List (CallArg Expression)
   md : MetaData Expression
 
 /-- The call that a command is, if it is one. -/
 def Command.callSites : Command → List CallSite
-  | .call procName args md => [{ procName, args, md }]
+  | .call procName tyArgs args md => [{ procName, tyArgs, args, md }]
   | .cmd _ => []
 
 mutual

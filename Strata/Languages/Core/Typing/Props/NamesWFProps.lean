@@ -29,14 +29,15 @@ import Strata.Languages.Core.ProcedureProps
 
 /-! ## Typing implies the name conditions
 
-A program typed by the typechecker spec has valid names, and so does each declaration, function,
-procedure, statement and command in it. Key theorems: `ProgramNamesWF.of_programHasType`,
-`DeclsNamesWF.of_declsHasType`, `DeclNamesWF.of_declHasType`, `ProcNamesWF.of_procHasType'`,
-`FuncNamesWF.of_funcHasType'`, `StatementsNamesWF.of_statementsHasTypeΔ'`,
-`StatementNamesWF.of_statementHasTypeΔ'` and `CmdNamesWF.of_cmdExtHasTypeΔ'`. Typing a
-statement list leaves the function table unchanged (`StatementsHasTypeΔ'.functions_eq`), and a
-typed declaration's context holds the functions it introduces
-(`DeclHasType.extendScope_subset`). -/
+A program typed by the typechecker spec has valid names, and so does each
+declaration, function, procedure, statement and command in it. Key theorems:
+`ProgramNamesWF.of_programHasType`, `DeclsNamesWF.of_declsHasType`,
+`DeclNamesWF.of_declHasType`, `ProcNamesWF.of_procHasTypeExact`,
+`FuncNamesWF.of_funcHasTypeExact`, `StatementsNamesWF.of_statementsHasType`,
+`StatementNamesWF.of_statementHasType` and `CmdNamesWF.of_cmdExtHasType`.
+Typing a statement list leaves the function table unchanged
+(`StatementsHasType.functions_eq`), and a typed declaration's context holds the
+functions it introduces (`DeclHasType.extendScope_subset`). -/
 
 namespace Core
 
@@ -49,10 +50,10 @@ public section
 /-! ### Function tables -/
 
 /-- Typing a statement leaves the function table of the context unchanged. -/
-private theorem StatementHasTypeΔ'.functions_eq {P : Program}
+private theorem StatementHasType.functions_eq {P : Program}
     {C C' : LContext CoreLParams} {Γ Γ' : TContext Unit} {Δ Δ' : WrittenEnv}
     {L : List String} {s : Statement}
-    (h : StatementHasTypeΔ' P C Γ Δ L s C' Γ' Δ') : C'.functions = C.functions := by
+    (h : StatementHasType P C Γ Δ L s C' Γ' Δ') : C'.functions = C.functions := by
   cases h with
   | typeDecl =>
     rename_i hadd _
@@ -60,14 +61,14 @@ private theorem StatementHasTypeΔ'.functions_eq {P : Program}
   | _ => rfl
 
 /-- Typing a statement list leaves the function table of the context unchanged. -/
-theorem StatementsHasTypeΔ'.functions_eq {P : Program}
+theorem StatementsHasType.functions_eq {P : Program}
     {C C' : LContext CoreLParams} {Γ Γ' : TContext Unit} {Δ Δ' : WrittenEnv}
     {L : List String} {ss : List Statement}
-    (h : StatementsHasTypeΔ' P C Γ Δ L ss C' Γ' Δ') : C'.functions = C.functions :=
+    (h : StatementsHasType P C Γ Δ L ss C' Γ' Δ') : C'.functions = C.functions :=
   match h with
   | .nil _ _ _ _ _ _ => rfl
   | .cons _ _ _ _ _ _ _ _ _ _ _ _ hs ht =>
-    (StatementsHasTypeΔ'.functions_eq ht).trans hs.functions_eq
+    (StatementsHasType.functions_eq ht).trans hs.functions_eq
 
 /-- Registering a mutual datatype block keeps every function of the context and adds each
     function generated for the block. -/
@@ -75,11 +76,7 @@ theorem addMutualBlock_mem_functions {C C' : LContext CoreLParams}
     {block : List (LDatatype Unit)} (h : C.addMutualBlock block = .ok C') (n : String)
     (hn : n ∈ C.functions ∨ n ∈ MutualDatatype.generatedFuncNames block) :
     n ∈ C'.functions := by
-  obtain ⟨-, ds, fgen, fs, ks, -, hfgen, hfs, -, rfl⟩ :=
-    LContext.addMutualBlock_ok_eq C C' block h
-  simp only [Factory.addFactory, Factory.tryAddAll] at hfs
-  rw [← Array.foldlM_toList] at hfs
-  have hlist := Factory.toList_toArray_foldlM_tryPush _ C.functions fs hfs
+  obtain ⟨fgen, hfgen, hlist⟩ := LContext.addMutualBlock_functions_toList h
   rw [Factory.mem_iff_mem_names]
   rcases hn with hold | hnew
   · rw [Factory.mem_iff_mem_names] at hold
@@ -162,10 +159,10 @@ theorem DeclHasType.extendScope_subset {P : Program}
 
 /-- An imperative command typed as an extended command with written type variables in scope
     has valid names for any function scope made of functions of `C`. -/
-theorem CmdNamesWF.of_cmdExtHasTypeΔ'
+theorem CmdNamesWF.of_cmdExtHasType
     {C : LContext CoreLParams} {P : Program} {Δ Δ' : WrittenEnv} {Γ Γ' : TContext Unit}
     {c : Cmd Expression} {fns : String → Prop} (hfns : ∀ n, fns n → n ∈ C.functions)
-    (h : CmdExtHasTypeΔ' C P Δ Γ (.cmd c) Γ' Δ') : CmdNamesWF fns c :=
+    (h : CmdExtHasType C P Δ Γ (.cmd c) Γ' Δ') : CmdNamesWF fns c :=
   match h with
   | .cmd _ _ _ _ _ hc =>
     match hc with
@@ -180,50 +177,50 @@ theorem CmdNamesWF.of_cmdExtHasTypeΔ'
 
 /-- An extended command typed with written type variables in scope, as a statement, has valid
     names for any function scope made of functions of `C`. -/
-private theorem StatementNamesWF.of_cmdExtHasTypeΔ'
+private theorem StatementNamesWF.of_cmdExtHasType
     {C : LContext CoreLParams} {P : Program} {Δ Δ' : WrittenEnv} {Γ Γ' : TContext Unit}
     {c : Command} {fns : String → Prop} (hfns : ∀ n, fns n → n ∈ C.functions)
-    (h : CmdExtHasTypeΔ' C P Δ Γ c Γ' Δ') : StatementNamesWF P fns (.cmd c) := by
+    (h : CmdExtHasType C P Δ Γ c Γ' Δ') : StatementNamesWF P fns (.cmd c) := by
   cases c with
-  | cmd c' => exact CmdNamesWF.of_cmdExtHasTypeΔ' hfns h
+  | cmd c' => exact CmdNamesWF.of_cmdExtHasType hfns h
   | call => trivial
 
 mutual
 
 /-- A statement typed by the typechecker spec with written type variables in scope has valid
     names for any function scope made of functions of `C`. -/
-theorem StatementNamesWF.of_statementHasTypeΔ' {P : Program}
+theorem StatementNamesWF.of_statementHasType {P : Program}
     {C C' : LContext CoreLParams} {Γ Γ' : TContext Unit} {Δ Δ' : WrittenEnv}
     {L : List String} {s : Statement} {fns : String → Prop}
     (hfns : ∀ n, fns n → n ∈ C.functions)
-    (h : StatementHasTypeΔ' P C Γ Δ L s C' Γ' Δ') : StatementNamesWF P fns s :=
+    (h : StatementHasType P C Γ Δ L s C' Γ' Δ') : StatementNamesWF P fns s :=
   match h with
-  | .cmd _ _ _ _ _ _ _ _ hc _ => StatementNamesWF.of_cmdExtHasTypeΔ' hfns hc
+  | .cmd _ _ _ _ _ _ _ _ hc _ => StatementNamesWF.of_cmdExtHasType hfns hc
   | .block _ _ _ _ _ _ _ _ _ _ _ _ hb _ =>
-    StatementsNamesWF.of_statementsHasTypeΔ' hfns hb
+    StatementsNamesWF.of_statementsHasType hfns hb
   | .ite_det _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ ht he _ =>
-    ⟨StatementsNamesWF.of_statementsHasTypeΔ' hfns ht,
-      StatementsNamesWF.of_statementsHasTypeΔ' hfns he⟩
+    ⟨StatementsNamesWF.of_statementsHasType hfns ht,
+      StatementsNamesWF.of_statementsHasType hfns he⟩
   | .ite_nondet _ _ _ _ _ _ _ _ _ _ _ _ _ _ ht he _ =>
-    ⟨StatementsNamesWF.of_statementsHasTypeΔ' hfns ht,
-      StatementsNamesWF.of_statementsHasTypeΔ' hfns he⟩
+    ⟨StatementsNamesWF.of_statementsHasType hfns ht,
+      StatementsNamesWF.of_statementsHasType hfns he⟩
   | .loop _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ hb _ =>
-    StatementsNamesWF.of_statementsHasTypeΔ' hfns hb
+    StatementsNamesWF.of_statementsHasType hfns hb
   | .exit .. => trivial
   | .typeDecl _ _ _ _ _ _ _ _ hprog _ _ _ => hprog
 
 /-- A statement list typed by the typechecker spec with written type variables in scope has
     valid names for any function scope made of functions of `C`. -/
-theorem StatementsNamesWF.of_statementsHasTypeΔ' {P : Program}
+theorem StatementsNamesWF.of_statementsHasType {P : Program}
     {C C' : LContext CoreLParams} {Γ Γ' : TContext Unit} {Δ Δ' : WrittenEnv}
     {L : List String} {ss : List Statement} {fns : String → Prop}
     (hfns : ∀ n, fns n → n ∈ C.functions)
-    (h : StatementsHasTypeΔ' P C Γ Δ L ss C' Γ' Δ') : StatementsNamesWF P fns ss :=
+    (h : StatementsHasType P C Γ Δ L ss C' Γ' Δ') : StatementsNamesWF P fns ss :=
   match h with
   | .nil .. => trivial
   | .cons _ _ _ _ _ _ _ _ _ _ _ _ hs ht =>
-    ⟨StatementNamesWF.of_statementHasTypeΔ' hfns hs,
-      StatementsNamesWF.of_statementsHasTypeΔ' (fun n hn => hs.functions_eq ▸ hfns n hn) ht⟩
+    ⟨StatementNamesWF.of_statementHasType hfns hs,
+      StatementsNamesWF.of_statementsHasType (fun n hn => hs.functions_eq ▸ hfns n hn) ht⟩
 
 end
 
@@ -231,9 +228,9 @@ end
 
 /-- A function typed by the typechecker spec has valid names for any function scope made of
     functions of `C`. -/
-theorem FuncNamesWF.of_funcHasType' {C : LContext CoreLParams}
+theorem FuncNamesWF.of_funcHasTypeExact {C : LContext CoreLParams}
     {Γ : TContext Unit} {f : Function} {fns : String → Prop}
-    (hfns : ∀ n, fns n → n ∈ C.functions) (h : FuncHasType' C Γ f) : FuncNamesWF fns f :=
+    (hfns : ∀ n, fns n → n ∈ C.functions) (h : FuncHasTypeExact C Γ f) : FuncNamesWF fns f :=
   fun x hx hf => h.formalsNotFunctions x hx (hfns _ hf)
 
 /-- A function has valid names when a renaming of its type parameters does. -/
@@ -275,27 +272,27 @@ private theorem ProcNamesWF.of_alphaVariant {P : Program} {fns : String → Prop
     exact hkeys
   refine ⟨hformals, ?_⟩
   cases hb : proc.body with
-  | cfg _ => trivial
+  | cfg _ | abstract => trivial
   | structured ss =>
-    simp only [Procedure.renameTypeArgs, hb] at hbody
+    simp only [Procedure.renameTypeArgs, Procedure.mapTys, hb] at hbody
     exact StatementsNamesWF.of_mapStmtsTys _ ss hbody
 
 /-- A procedure typed by the typechecker spec has valid names for any function scope made of
     functions of `C`. -/
-theorem ProcNamesWF.of_procHasType' {P : Program}
+theorem ProcNamesWF.of_procHasTypeExact {P : Program}
     {C : LContext CoreLParams} {Γ : TContext Unit} {proc : Procedure} {fns : String → Prop}
-    (hfns : ∀ n, fns n → n ∈ C.functions) (h : ProcHasType' P C Γ proc) :
+    (hfns : ∀ n, fns n → n ∈ C.functions) (h : ProcHasTypeExact P C Γ proc) :
     ProcNamesWF P fns proc := by
   refine ⟨?_, ?_⟩
   · exact fun x hx hf => h.formalsNotFunctions x hx (hfns _ hf)
   · have hbody := h.bodyTyped
     cases hshape : proc.body with
-    | cfg _ => trivial
+    | cfg _ | abstract => trivial
     | structured _ =>
       rw [hshape] at hbody
       match hbody with
-      | .structured _ _ _ _ hss =>
-        exact StatementsNamesWF.of_statementsHasTypeΔ'
+      | .structured _ _ _ _ _ hss =>
+        exact StatementsNamesWF.of_statementsHasType
           (C := { C with rigidTypeVars := C.rigidTypeVars ++ proc.header.typeArgs }) hfns hss
 
 /-- A declaration typed by the typechecker spec has valid names for any function scope made of
@@ -312,13 +309,13 @@ theorem DeclNamesWF.of_declHasType {P : Program} {C C' : LContext CoreLParams}
   | .lemma .. => trivial
   | .distinct .. => trivial
   | .proc _ _ _ _ ⟨_, hv, hp⟩ =>
-    ProcNamesWF.of_alphaVariant hv (ProcNamesWF.of_procHasType' hfns hp)
+    ProcNamesWF.of_alphaVariant hv (ProcNamesWF.of_procHasTypeExact hfns hp)
   | .func _ _ _ _ _ _ _ _ hv hf _ =>
-    FuncNamesWF.of_alphaVariant hv (FuncNamesWF.of_funcHasType' hfns hf)
+    FuncNamesWF.of_alphaVariant hv (FuncNamesWF.of_funcHasTypeExact hfns hf)
   | .recFuncBlock _ _ _ _ _ _ _ _ _ _ _ _ hvars hstubs hfull hextS _ hfs _ => by
     intro f hf
     obtain ⟨f', hf', hv⟩ := List.Rel₂.exists_of_mem_left hvars hf
-    refine FuncNamesWF.of_alphaVariant hv (FuncNamesWF.of_funcHasType' ?_ (hfs f' hf'))
+    refine FuncNamesWF.of_alphaVariant hv (FuncNamesWF.of_funcHasTypeExact ?_ (hfs f' hf'))
     intro n hn
     rcases hn with hold | hnew
     · exact hextS.mem_old (hfns n hold)
@@ -351,6 +348,103 @@ theorem ProgramNamesWF.of_programHasType {C : LContext CoreLParams} {Γ : TConte
     {P : Program} (h : ProgramHasType C Γ P) : ProgramNamesWF C P := by
   obtain ⟨hnodup, hidents, C', Γ', hds⟩ := h
   exact ⟨hnodup, hidents, DeclsNamesWF.of_declsHasType (fun _ hn => hn) hds⟩
+
+/-! ### Names under smaller function scopes and programs -/
+
+/-- Function names stay valid under a smaller function scope. -/
+theorem FuncNamesWF.mono {fns fns' : String → Prop} (hsub : ∀ n, fns n → fns' n)
+    {f : Function} (h : FuncNamesWF fns' f) : FuncNamesWF fns f :=
+  fun x hx hn => h x hx (hsub _ hn)
+
+mutual
+
+/-- Statement names stay valid under a smaller function scope and a program declaring only
+    names the original declares. -/
+private theorem StatementNamesWF.mono {P P' : Program} {fns fns' : String → Prop}
+    (hP : ∀ n ∈ P'.getNames, n ∈ P.getNames) (hsub : ∀ n, fns n → fns' n) :
+    (s : Statement) → StatementNamesWF P fns' s → StatementNamesWF P' fns s
+  | .cmd (.cmd c), h => by
+    cases c with
+    | init _ _ _ _ => exact fun hn => h (hsub _ hn)
+    | set _ _ _ => exact h
+    | assert _ _ _ => exact h
+    | assume _ _ _ => exact h
+    | cover _ _ _ => exact h
+  | .cmd (.call _ _ _ _), h => h
+  | .block _ b _, h => StatementsNamesWF.mono hP hsub b h
+  | .ite _ t e _, h => ⟨StatementsNamesWF.mono hP hsub t h.1, StatementsNamesWF.mono hP hsub e h.2⟩
+  | .loop _ _ _ b _, h => StatementsNamesWF.mono hP hsub b h
+  | .exit _ _, h => h
+  | .typeDecl _ _, h => fun n hn => h n (hP n hn)
+
+/-- Statement-list names stay valid under a smaller function scope and a program declaring only
+    names the original declares. -/
+private theorem StatementsNamesWF.mono {P P' : Program} {fns fns' : String → Prop}
+    (hP : ∀ n ∈ P'.getNames, n ∈ P.getNames) (hsub : ∀ n, fns n → fns' n) :
+    (ss : List Statement) → StatementsNamesWF P fns' ss → StatementsNamesWF P' fns ss
+  | [], h => h
+  | s :: ss, h => ⟨StatementNamesWF.mono hP hsub s h.1, StatementsNamesWF.mono hP hsub ss h.2⟩
+
+end
+
+/-- Procedure names stay valid under a smaller function scope and a program declaring only names
+    the original declares. -/
+theorem ProcNamesWF.mono {P P' : Program} {fns fns' : String → Prop}
+    (hP : ∀ n ∈ P'.getNames, n ∈ P.getNames) (hsub : ∀ n, fns n → fns' n) {p : Procedure}
+    (h : ProcNamesWF P fns' p) : ProcNamesWF P' fns p := by
+  obtain ⟨hformals, hbody⟩ := h
+  refine ⟨fun x hx hn => hformals x hx (hsub _ hn), ?_⟩
+  cases hb : p.body with
+  | structured ss =>
+    rw [hb] at hbody
+    exact StatementsNamesWF.mono hP hsub ss hbody
+  | cfg _ | abstract => trivial
+
+/-! ### Names under type-annotation maps -/
+
+mutual
+
+/-- Mapping the type annotations of a statement keeps its names valid. -/
+theorem StatementNamesWF.mapStmtTys {P : Program} {fns : String → Prop}
+    (f : LMonoTy → LMonoTy) :
+    (s : Statement) → StatementNamesWF P fns s → StatementNamesWF P fns (mapStmtTys f s)
+  | .cmd (.cmd c), h => by
+    rw [mapStmtTys_cmd]
+    cases c <;> exact h
+  | .cmd (.call _ _ _ _), _ => by
+    rw [mapStmtTys_cmd]
+    trivial
+  | .block _ b _, h => by
+    rw [mapStmtTys_block]
+    exact StatementsNamesWF.mapStmtsTys f b h
+  | .ite _ t e _, h => by
+    rw [mapStmtTys_ite]
+    exact ⟨StatementsNamesWF.mapStmtsTys f t h.1,
+      StatementsNamesWF.mapStmtsTys f e h.2⟩
+  | .loop _ _ _ b _, h => by
+    rw [mapStmtTys_loop]
+    exact StatementsNamesWF.mapStmtsTys f b h
+  | .exit _ _, h => by
+    rw [mapStmtTys_exit]
+    exact h
+  | .typeDecl _ _, h => by
+    rw [mapStmtTys_typeDecl]
+    exact h
+
+/-- Mapping the type annotations of a statement list keeps its names valid. -/
+theorem StatementsNamesWF.mapStmtsTys {P : Program} {fns : String → Prop}
+    (f : LMonoTy → LMonoTy) :
+    (ss : List Statement) → StatementsNamesWF P fns ss →
+      StatementsNamesWF P fns (mapStmtsTys f ss)
+  | [], h => by
+    rw [mapStmtsTys_nil]
+    exact h
+  | s :: ss, h => by
+    rw [mapStmtsTys_cons]
+    exact ⟨StatementNamesWF.mapStmtTys f s h.1,
+      StatementsNamesWF.mapStmtsTys f ss h.2⟩
+
+end
 
 end -- public section
 

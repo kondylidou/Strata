@@ -25,7 +25,7 @@ def resolveLaurel (options : LaurelTranslateOptions) (program : LaurelProgram) :
   let program := { program with
     staticProcedures := coreDefinitionsForLaurel.staticProcedures ++ program.staticProcedures
     types := coreDefinitionsForLaurel.types ++ program.types }
-  let result := resolveWithInferredThrows program (gradualTypes := options.gradualTypes)
+  let result := resolveWithInferredThrows program
     (realizeCoercion := options.realizeCoercion) (toBool := options.toBool)
     (reservedNames := options.reservedNames)
     -- An entry procedure may use a global of a constrained type here. The Laurel pipeline
@@ -40,7 +40,7 @@ def resolveLaurel (options : LaurelTranslateOptions) (program : LaurelProgram) :
   let (eliminated, stackDiags) := eliminateStack result.program (exprReadsHeap result.model.heapReaders)
     (some result.model.heapWriters)
   if !stackDiags.isEmpty then .error (errs ++ stackDiags) else
-  let again := resolveWithInferredThrows eliminated (gradualTypes := options.gradualTypes)
+  let again := resolveWithInferredThrows eliminated
     (realizeCoercion := options.realizeCoercion) (toBool := options.toBool)
     (reservedNames := options.reservedNames) (entryConstrainedGlobals := true)
   let errs' := again.errors.toList
@@ -82,6 +82,16 @@ def translate (options : LaurelTranslateOptions) (program : LaurelProgram) :
 names. -/
 def wireToCortex (program : Wire.Program) : Except String UnorderedProgram :=
   program.withPreludes >>= Wire.Program.toCortex
+
+/-- Check a wire program without running it: translate it to Cortex, lower it
+to Core and type-check the Core program. The error names the step that
+rejected the program. -/
+def checkWire (program : Wire.Program) : Except String Unit := do
+  let m ← (wireToCortex program).mapError (s!"invalid Cortex program: {·}")
+  let core ← (toCoreProgram m).mapError (s!"Cortex lowering failed: {·}")
+  match _root_.Core.typeCheck .quiet core with
+  | .ok _ => pure ()
+  | .error e => throw s!"Core type checking failed: {e}"
 
 end
 

@@ -8,6 +8,7 @@ module
 meta import Strata.Languages.Core
 meta import Strata.Languages.Core.DDMTransform.Translate
 meta import Strata.Languages.Core.IncrementalSolve
+meta import StrataTest.Util.LeanExport
 meta import Strata.Languages.Core.ObligationExtraction
 meta import Strata.Transform.CommonSubexprElim
 meta import Strata.Examples.EmbeddedData
@@ -223,7 +224,7 @@ procedure P()
   var m : Map int int;
   var b : Box;
   assume [boxed]: b == MkBox(m);
-  assert [sameBox]: b == MkBox(m);
+  assert [sameBox]: MkBox(m) == b;
 };
 #end
 
@@ -305,12 +306,12 @@ const c : int;
 axiom [cPos]: int.gt(c, 0);
 lemma [early]: int.gt(c, 1);
 axiom [cBig]: int.gt(c, 1);
-lemma [late]: int.gt(c, 1);
+lemma [late]: int.ge(c, 2);
 
 procedure p()
 {
-  assert [p1]: int.gt(c, 0);
-  assert [p2]: int.gt(c, 1);
+  assert [p1]: int.ge(c, 1);
+  assert [p2]: int.ge(c, 2);
 };
 #end
 
@@ -347,12 +348,12 @@ program Core;
 
 const c : int;
 axiom [cPos]: int.gt(c, 0);
-lemma [l1]: int.gt(c, 0);
+lemma [l1]: int.lt(0, c);
 lemma [l2]: int.ge(c, 1);
 function twice(n : int) : int { int.mul(n, 2) }
 lemma [l3]: int.gt(twice(c), 5);
 axiom [cBig]: int.gt(c, 1);
-lemma [afterAxiom]: int.gt(c, 1);
+lemma [afterAxiom]: int.ge(c, 2);
 #end
 
 /--
@@ -801,7 +802,7 @@ procedure P()
   var x : int;
   assume [pos]: int.gt(x, 0);
   assert [a1]: int.ge(x, 1);
-  assert [a2]: int.gt(x, 0);
+  assert [a2]: int.ge(x, 0);
   assume [more]: int.gt(x, 5);
   assert [b1]: int.ge(x, 6);
   assert [b2]: int.gt(x, 4);
@@ -1120,7 +1121,7 @@ session 0: 1 checks, 1 contexts
 /-! ### `--stop-on-first-error` stops taking goals after the first failure
 
 `neg` is always false under `pos`, so it fails, and the run stops before checking `pos2`. That
-goal is left out of the results, as the per-obligation loop leaves out what it never reached. -/
+goal is reported as not checked, as the per-obligation loop reports what it never reached. -/
 
 private def failsFirst :=
 #strata
@@ -1137,6 +1138,7 @@ procedure P()
 
 /--
 info: neg: session 0 REFUTED
+pos2: not checked
 session 0: 1 checks, 1 contexts
 -/
 #guard_msgs in
@@ -1145,7 +1147,7 @@ session 0: 1 checks, 1 contexts
 
 /-! A goal decided without a solver stops the run too. The contradiction in the first arm decides
 `reach`, a `cover` found unreachable, which is a failure; so the second arm's session is never
-taken and `other` is left out. -/
+taken and `other` is reported as not checked. -/
 
 private def deadCoverStops :=
 #strata
@@ -1168,6 +1170,7 @@ procedure P()
 /--
 info: contradiction: session 0 proved
 reach: session 0 unknown
+other: not checked
 session 0: 1 checks, 1 contexts
 -/
 #guard_msgs in
@@ -1597,8 +1600,8 @@ axiom [bNeg]: int.lt(b, 0);
 
 procedure P()
 {
-  assert [usesA]: int.gt(a, 0);
-  assert [usesB]: int.lt(b, 0);
+  assert [usesA]: int.ge(a, 1);
+  assert [usesB]: int.le(b, int.neg(1));
 };
 #end
 
@@ -1776,7 +1779,8 @@ session 1: 1 checks, 1 contexts
 /-! ### `--stop-on-first-error` stops the one-shot half too
 
 `a1` fails in a procedure walked as a tree, so the procedure holding the single goal `b1` is
-never sent, as the per-obligation loop would stop after `a1`. -/
+never sent, as the per-obligation loop would stop after `a1`. The goals the run did not reach are
+reported as not checked. -/
 
 private def failsBeforeLone :=
 #strata
@@ -1800,6 +1804,8 @@ procedure B()
 
 /--
 info: a1: REFUTED
+a2: not checked
+b1: not checked
 -/
 #guard_msgs in
 #eval do
@@ -2228,7 +2234,7 @@ info: DoubleTwice.core.st: agree on 2
 HeapReasoning.core.st: agree on 50
 IrrelevantAxioms.core.st: agree on 1
 LoopSimple.core.st: agree on 8
-SafeBvOps.core.st: agree on 8
+SafeBvOps.core.st: agree on 8, 8 with a counterexample
 SimpleProc.core.st: agree on 2
 TwoLoops.core.st: agree on 4
 -/
@@ -2248,7 +2254,7 @@ info: DoubleTwice.core.st: agree on 2
 HeapReasoning.core.st: agree on 50
 IrrelevantAxioms.core.st: agree on 1
 LoopSimple.core.st: agree on 8
-SafeBvOps.core.st: agree on 8
+SafeBvOps.core.st: agree on 8, 8 with a counterexample
 SimpleProc.core.st: agree on 2
 TwoLoops.core.st: agree on 4
 -/
@@ -2388,6 +2394,7 @@ private def paramNamedLikeFunctionAst : Core.Program := { decls := [
           body := .structured
             [Core.Statement.assert "g" (.eq Core.coreLoc cParam (.intConst Core.coreLoc 5)) .empty,
              Core.Statement.assert "g2" (.eq Core.coreLoc cParam (.intConst Core.coreLoc 5)) .empty]
+             false
                  }
     .empty] }
 
@@ -2402,7 +2409,7 @@ private def withoutSymbolicEval : Option (Core.ValidatedPipeline Core.ProgramFac
   (Core.validatePipeline
     (entry ++ [Core.passTypeCheck .quiet, Core.passTermCheck, Core.passPrecondElim,
       Core.passGenOpaqueTypeParams, Core.passMonomorphizeFunctions, Core.passSimplify,
-      ho, pc, Core.passFunctionInlining, Core.passBetaReduce])).toOption
+      ho, pc, Core.passFunctionInlining, Core.passBetaReduce, Core.passLambdaLift])).toOption
 
 /--
 info: error: ❌ Type checking error.
@@ -2440,9 +2447,46 @@ session 0: 2 checks, 1 contexts
           proc with
       | .ok ss => IO.println (Std.format ss)
       | .error e => IO.println s!"error: {e}"
-  match ← Core.IncrementalSolve.verifyProgram p 1 with
+  match ← Core.IncrementalSolve.verifyProgram p 1 (typeCheckFirst := false) with
   | .ok (results, _, trace) => IO.println (trace.format results)
   | .error e => IO.println s!"error: {e}"
+
+/-- A procedure asserting `1 + true == 2`, which adds an integer to a Boolean. -/
+private def intPlusBoolAst : Core.Program := { decls := [
+  .proc { header := { name := "Q", typeArgs := [], inputs := [], outputs := [] },
+          spec := { preconditions := [], postconditions := [] },
+          body := .structured
+            [Core.Statement.assert "h"
+              (.eq Core.coreLoc
+                (.app Core.coreLoc (.app Core.coreLoc (.op Core.coreLoc "Int.Add" none)
+                  (.intConst Core.coreLoc 1)) (.boolConst Core.coreLoc true))
+                (.intConst Core.coreLoc 2)) .empty] false }
+    .empty] }
+
+/-! `verifyProgram` and `verifyProgramWith`, asked to type check the program first
+(`typeCheckFirst := true`), refuse one that does not type check with the type error, as
+`Core.verify` does, and no goal gets a verdict. -/
+
+/--
+info: verifyProgram: error: ❌ Type checking error.
+Procedure 'Q': Impossible to unify (arrow int int) with (arrow bool _).
+First mismatch: int with bool.
+verifyProgramWith: error: ❌ Type checking error.
+Procedure 'Q': Impossible to unify (arrow int int) with (arrow bool _).
+First mismatch: int with bool.
+-/
+#guard_msgs in
+#eval show IO Unit from do
+  let report (name : String) (r : Except Std.Format (VCResults × Statistics × Trace)) :=
+    match r with
+    | .ok (results, _, trace) => IO.println s!"{name}: {trace.format results}"
+    | .error e => IO.println s!"{name}: error: {e}"
+  report "verifyProgram"
+    (← Core.IncrementalSolve.verifyProgram intPlusBoolAst 1 (typeCheckFirst := true))
+  let unused : Core.IncrementalSolve.SessionFactory :=
+    { τ := Unit, σ := Unit, spawn := fun _ => throw (IO.userError "no solver is opened") }
+  report "verifyProgramWith"
+    (← Core.IncrementalSolve.verifyProgramWith unused intPlusBoolAst 1 (typeCheckFirst := true))
 
 /-! The same pipeline leaves a node every assertion it had, so through it the programs below put
 several goals on one session, and the walk is compared with the per-obligation path on them. -/
@@ -2488,6 +2532,149 @@ exact: usesF ✅ pass, other ❌ fail
     | .ok rs => IO.println s!"{name}: {", ".intercalate (rs.toList.map fun r =>
         s!"{r.obligation.label} {r.formatOutcome}")}"
     | .error e => IO.println s!"{name}: error: {e}"
+
+/-! The Lean export states each goal's own query, whatever else its session holds. `usesF`
+brings a contradiction (an axiom, or an axiom over an interpreted function) that the pruning of
+`other` drops. Under lazy pruning the solver still holds it when `other` is asked; exact
+pruning clears it, including when the reset needs a replacement solver. Either way the file of
+`usesF` has the contradiction as a premise and the file of `other` does not, and the files are
+the same in all three modes. -/
+
+private def contraDefinition :=
+#strata
+program Core;
+function f(x : int) : int { x }
+axiom [contra]: f(0) == 1;
+procedure P(x : int) {
+  assert [usesF]: 1 == f(0);
+  assert [other]: x == 3;
+};
+#end
+
+#guard_msgs in
+run_elab do
+  liftM (m := IO) <| IO.FS.withTempDir fun root => do
+    -- With each program, how often the file of `usesF` names `f`: as a symbol, in the goal,
+    -- and in the contradicting axiom, which is a premise.
+    for (name, program, mentions) in
+        [("axiom", contraAxiom, 4), ("definition", contraDefinition, 3)] do
+      let mut files : Array (Array (String × String)) := #[]
+      for (exactPruning, replace) in [(false, false), (true, false), (true, true)] do
+        let resets ← IO.mkRef 0
+        let opens ← IO.mkRef 0
+        let checks ← IO.mkRef 0
+        let (config, events) ← Core.LeanExport.Tests.recording
+          (root / s!"{name}-{exactPruning}-{replace}")
+        let factory : Core.IncrementalSolve.SessionFactory := {
+          τ := Strata.SMT.Term, σ := Strata.SMT.TermType
+          spawn := fun options => do
+            opens.modify (· + 1)
+            let solver ← localCvc5 options
+            return { solver with
+              checkSatAssuming := fun _ => do
+                checks.modify (· + 1)
+                pure .unknown
+              getModelText := fun _ => pure ""
+              reset := do
+                resets.modify (· + 1)
+                if replace then throw <| IO.userError "fixture requires a replacement"
+                solver.reset } }
+        let options := { VerifyOptions.quiet with
+          removeIrrelevantAxioms := .Aggressive, exactPruning, leanExport := some config }
+        let result ← Core.IncrementalSolve.verifyProgramWith factory (parse program) 1 options
+        let (results, _, _) ← IO.ofExcept (result.mapError toString)
+        -- The export does not change a verdict: both goals stay as the solver left them.
+        let actual := results.map Core.IncrementalSolve.verdictOf
+        unless actual == #["unknown", "unknown"] do
+          throw <| IO.userError s!"{name} (exact={exactPruning}, replace={replace}): \
+            the export changed a verdict: {actual}"
+        let exported := (← events.get).filter (·.stage == .exported)
+        unless exported.size == 2 do
+          let diagnostics := (← events.get).map fun event =>
+            s!"{event.label}: {event.stage}: {event.diagnostic}"
+          throw <| IO.userError s!"{name} (exact={exactPruning}, replace={replace}): \
+            expected two exported goals; {diagnostics}"
+        unless (← checks.get) == 2 do
+          throw <| IO.userError "The context test did not walk both goals"
+        if exactPruning then
+          unless (← resets.get) > 0 && (!replace || (← opens.get) > 1) do
+            throw <| IO.userError "The context-clearing control did not reset or replace its solver"
+        let text (label : String) : IO (String × String) := do
+          let some event := exported.find? (·.label == label)
+            | throw <| IO.userError s!"{name}: no exported goal is labelled {label}"
+          let some file := event.file | throw <| IO.userError "An exported goal has no file"
+          return (file.fileName.getD "", ← IO.FS.readFile file)
+        let usesF ← text "usesF"
+        let other ← text "other"
+        let names (text : String) := Core.LeanExport.Tests.occurrences text "«f»"
+        unless names usesF.2 == mentions && names other.2 == 0 do
+          throw <| IO.userError s!"{name} (exact={exactPruning}, replace={replace}): \
+            an exported file does not state its goal's own query"
+        files := files.push #[usesF, other]
+        if name == "axiom" && !exactPruning then
+          -- `Strata.Core.verifyProgram`, with `incremental` set, walks the same tree and
+          -- exports on it.
+          events.set #[]
+          checks.set 0
+          let results ← EIO.toIO IO.userError <|
+            Strata.Core.verifyProgram (parse program)
+              { options with incremental := true, minSessions := some 1 }
+              (pipeline := withoutSymbolicEval) (mkSession := some factory)
+          -- The files of the first walk exist, so this one keeps them.
+          unless results.size == 2 && results.all (·.hasValidityUnknown) && (← checks.get) == 2 &&
+              ((← events.get).filter (·.stage == .kept)).size == 2 do
+            throw <| IO.userError "Core options did not reach the shared incremental tree"
+      unless files.all (· == files[0]!) do
+        throw <| IO.userError s!"{name}: the exported files depend on what the session holds"
+
+/-! When both checks of a goal are asked and the solver times out on the satisfiability check
+only, the walk still asks the validity check, and exports it with its own answer; the timeout
+is reported as without the export. Under the scope `all` a decided validity check is exported
+too. -/
+#guard_msgs in
+run_elab do
+  liftM (m := IO) <| IO.FS.withTempDir fun root => do
+    for (scope, validity, expected, answer) in [
+        (Core.LeanExport.Scope.undecided, Strata.SMT.Decision.unknown, 2, "unknown"),
+        (.undecided, .unsat, 0, ""), (.all, .unsat, 2,
+          "unsat (in a solver session that may hold more than this query states)")] do
+      let asked ← IO.mkRef 0
+      let (config, events) ← Core.LeanExport.Tests.recording
+        (root / s!"{repr scope}-{repr validity}") scope
+      let factory : Core.IncrementalSolve.SessionFactory := {
+        τ := Strata.SMT.Term, σ := Strata.SMT.TermType
+        spawn := fun options => do
+          let solver ← localCvc5 options
+          return { solver with
+            -- Each goal asks satisfiability first, then validity.
+            checkSatAssuming := fun _ => do
+              let n ← asked.modifyGet fun n => (n, n + 1)
+              pure (if n % 2 == 0 then .timeout else validity)
+            getModelText := fun _ => pure "" } }
+      let run (leanExport : Option Core.LeanExport.ExportConfig) : IO (Array String) := do
+        asked.set 0
+        let options := { VerifyOptions.quiet with checkLevel := .full, leanExport }
+        let result ← Core.IncrementalSolve.verifyProgramWith factory (parse contraDefinition) 1
+          options
+        let (results, _, _) ← IO.ofExcept (result.mapError toString)
+        return results.map Core.IncrementalSolve.verdictOf
+      let baseline ← run none
+      unless baseline == #["timeout", "timeout"] do
+        throw <| IO.userError s!"The satisfiability timeout is not reported: {baseline}"
+      let actual ← run (some config)
+      unless actual == baseline && (← asked.get) == 4 do
+        throw <| IO.userError s!"The export changed a verdict after a satisfiability timeout: \
+          {actual} instead of {baseline}"
+      let exported := (← events.get).filter (·.stage == .exported)
+      unless exported.size == expected do
+        let seen := (← events.get).map fun event => s!"{event.label}: {event.stage}"
+        throw <| IO.userError s!"scope {repr scope}, validity {repr validity}: expected \
+          {expected} exported goals; {seen}"
+      for event in exported do
+        let some file := event.file | throw <| IO.userError "An exported goal has no file"
+        unless ((← IO.FS.readFile file).splitOn s!"-- Solver's answer: {answer}\n").length == 2 do
+          throw <| IO.userError s!"scope {repr scope}: {event.label} is not exported with the \
+            answer to its validity check"
 
 /-! A literal SMT-LIB cannot spell, which common-subexpression elimination hoists above the
 goals of an unrelated procedure, fails only the goal that uses it: the two goals of the
@@ -2825,7 +3012,7 @@ procedure P(x : int, out y : int)
 
 /-! Under `--stop-on-first-error`, every goal of this procedure is a session of one goal once
 symbolic evaluation has run, so all of them are sent to the per-obligation discharge, which stops
-at `f1bad`. The goals it never reached are left out in both modes. -/
+at `f1bad`. The goals it never reached are reported as not checked in both modes. -/
 
 private def stopsMidway :=
 #strata
@@ -2841,7 +3028,7 @@ procedure P()
 };
 #end
 
-/-- info: stopsMidway: agree on 2, 1 with a counterexample -/
+/-- info: stopsMidway: agree on 4, 1 with a counterexample -/
 #guard_msgs in
 #eval bothWays "stopsMidway" (parse stopsMidway)
   { VerifyOptions.quiet with stopOnFirstError := true }

@@ -55,17 +55,22 @@ Key theorem families:
   `assertionValidFrom_reflect`.
 * **`Trace.WeakensAssumes`** is reflexive and transitive
   (`Trace.WeakensAssumes.refl`, `Trace.WeakensAssumes.trans`), as is its event-level
-  counterpart relation `Event.WeakensAssume`.  It carries assumption satisfaction from
+  counterpart relation `Event.WeakensAssume`, and holds of event lists related pairwise by
+  `Event.WeakensAssume` (`Trace.WeakensAssumes.of_rel₂`).  It carries assumption satisfaction from
   the source to the target (`Trace.WeakensAssumes.assumptionsHold_transfer`) and reflects
   assertion validity from the target to the source
-  (`Trace.WeakensAssumes.assertionsValid_reflect`).
+  (`Trace.WeakensAssumes.assertionsValid_reflect`). So does validity of a single assertion
+  identifier (`Trace.WeakensAssumes.assertionValid`, from
+  `Trace.WeakensAssumes.assertionsValidFromP`).
 * **`Trace.InsertsTrueAssumes`** is reflexive and closed under concatenation (`refl`,
   `append`) and carries assumption satisfaction forward under
   `ConditionInterp.TrueStutterHolds` (`assumptionsHold`).  So is its composition with
   `Trace.MayDropEvents`, a `List.Sublist` (`Trace.mayDropEvents_insertsTrueAssumes_*`;
-  `drop_left` drops a prefix of the source).  `Trace.PreservesLastEvent` composes on the
-  left (`append_left`), and a relation preserving the last event followed by extra events
-  reflects last assertions (`Trace.PreservesLastEvent.reflectsLastAssertion`).
+  `drop_left` drops a prefix of the source).  Under the same hypothesis,
+  `Trace.InsertsTrueAssumes` reflects assertion validity (`assertionsValid_reflect`).
+  `Trace.PreservesLastEvent` composes on the left (`append_left`), and a relation preserving
+  the last event followed by extra events reflects last assertions
+  (`Trace.PreservesLastEvent.reflectsLastAssertion`).
 * **`Trace.InsertsAsserts`** and **`Trace.InsertsCheckedAssumes`** hold under a larger set of
   allowed factories (`mono_allowed`), and, under an interpretation for which conditions with the
   same value hold alike (and, for the second, true conditions hold), reflect assertion validity
@@ -863,6 +868,59 @@ theorem Trace.WeakensAssumes.assertionsValid_reflect {I : ConditionInterp P} {s 
     Trace.AssertionsValid P I s :=
   h.assertionsValidFrom_reflect (fun _ hw => hw) hv
 
+/-- **Weakened assumptions reflect assertion validity.** If every assertion kept by `keep` in
+    `t'` holds under the assumptions before it (with `A'` before `t'`), so does every one in `t`
+    (with `A` before `t`), when the assumptions `A` give `A'` and `keep` reads only an
+    assertion's label and metadata: each assertion of `t` has a counterpart in `t'` that holds
+    in the same worlds, after assumptions that hold wherever `t`'s do. -/
+theorem Trace.WeakensAssumes.assertionsValidFromP {I : ConditionInterp P}
+    {keep : EventArg P → Prop}
+    (hkeep : ∀ a b : EventArg P, a.label = b.label → a.metadata = b.metadata →
+      (keep a ↔ keep b)) {t t' : Trace P} (h : Trace.WeakensAssumes I t t') :
+    ∀ {A A' : Trace P}, (∀ w, Trace.AssumptionsHold P I w A → Trace.AssumptionsHold P I w A') →
+      Trace.AssertionsValidFromP P I keep A' t' → Trace.AssertionsValidFromP P I keep A t := by
+  have hsub : ∀ {w} {A : Trace P} {a}, Trace.AssumptionsHold P I w (A ++ [.assume a]) →
+      Trace.AssumptionsHold P I w A ∧ I.holds w a := fun hw =>
+    ⟨fun c hc => hw c (List.mem_append_left _ hc), hw _ (List.mem_append_right _ (by simp))⟩
+  induction h with
+  | nil => intro _ _ _ _; trivial
+  | @cons e e' t t' he _ ih =>
+    intro A A' hA hv
+    cases e <;> cases e' <;> simp only [Event.WeakensAssume] at he
+    · obtain ⟨hl, hm, hh⟩ := he
+      simp only [Trace.AssertionsValidFromP] at hv ⊢
+      exact ⟨fun hk w hw => (hh w).mpr (hv.1 ((hkeep _ _ hl hm).mp hk) w (hA w hw)),
+        ih hA hv.2⟩
+    · obtain ⟨-, -, hh⟩ := he
+      simp only [Trace.AssertionsValidFromP] at hv ⊢
+      refine ih (fun w hw => ?_) hv
+      obtain ⟨hw, ha⟩ := hsub hw
+      intro c hc
+      rcases List.mem_append.mp hc with hc | hc
+      · exact hA w hw c hc
+      · simp only [List.mem_singleton, Event.assume.injEq] at hc; subst hc; exact hh w ha
+    · simp only [Trace.AssertionsValidFromP] at hv ⊢
+      exact ih hA hv
+  | dropAssume _ ih =>
+    intro A A' hA hv
+    simp only [Trace.AssertionsValidFromP]
+    exact ih (fun w hw => hA w (hsub hw).1) hv
+
+/-- `Trace.WeakensAssumes` reflects the validity of an assertion identifier. -/
+theorem Trace.WeakensAssumes.assertionValid {I : ConditionInterp P} {t t' : Trace P}
+    (h : Trace.WeakensAssumes I t t') (aid : AssertId P) :
+    Trace.AssertionValid P I aid t' → Trace.AssertionValid P I aid t :=
+  h.assertionsValidFromP (fun a b hl hm => by rw [hl, hm]) (fun _ h => h)
+
+/-- Event lists whose events correspond pairwise (`Event.WeakensAssume`) are related as
+    traces. `Trace.WeakensAssumes` also allows dropped assumptions, which a pairwise match
+    does not use. -/
+theorem Trace.WeakensAssumes.of_rel₂ {I : ConditionInterp P} :
+    ∀ {l l' : List (Event P)}, List.Rel₂ (Event.WeakensAssume I) l l' →
+      Trace.WeakensAssumes I l l'
+  | _, _, .nil => .nil
+  | _, _, .cons h hs => .cons h (Trace.WeakensAssumes.of_rel₂ hs)
+
 end WeakensAssumes
 
 section DropsAndInserts
@@ -907,6 +965,40 @@ theorem Trace.InsertsTrueAssumes.assumptionsHold {I : ConditionInterp P}
     · cases hc
       exact htrue a hf he w
     · exact ih hA c hc
+
+/-- Assertion validity reflects from `t'`, which is `t` with true assumptions inserted, to `t`
+    (with `A` before `t` and `A'` before `t'`), when the assumptions `A` give `A'` and every
+    operationally true condition under an allowed factory holds in every world. -/
+private theorem Trace.InsertsTrueAssumes.assertionsValidFromP {I : ConditionInterp P}
+    {sel : EventArg P → Prop} (htrue : I.TrueStutterHolds allowed) {t t' : Trace P}
+    (h : Trace.InsertsTrueAssumes allowed t t') :
+    ∀ {A A' : Trace P}, (∀ w, Trace.AssumptionsHold P I w A → Trace.AssumptionsHold P I w A') →
+      Trace.AssertionsValidFromP P I sel A' t' → Trace.AssertionsValidFromP P I sel A t := by
+  induction h with
+  | nil => intro _ _ _ _; trivial
+  | @keep e _ _ _ ih =>
+    intro A A' hA hv
+    cases e with
+    | assert c => exact ⟨fun hk w hw => hv.1 hk w (hA w hw), ih hA hv.2⟩
+    | assume c =>
+      refine ih (fun w hw => ?_) hv
+      rw [Trace.AssumptionsHold_append_assume] at hw ⊢
+      exact ⟨hA w hw.1, hw.2⟩
+    | cover _ => exact ih hA hv
+  | @assume a _ _ hf he _ ih =>
+    intro A A' hA hv
+    refine ih (fun w hw => ?_) hv
+    rw [Trace.AssumptionsHold_append_assume]
+    exact ⟨hA w hw, htrue a hf he w⟩
+
+/-- Assertion validity reflects from a trace with true assumptions inserted to the trace
+    without them, when every operationally true condition under an allowed factory holds in
+    every world. -/
+theorem Trace.InsertsTrueAssumes.assertionsValid_reflect {I : ConditionInterp P}
+    (htrue : I.TrueStutterHolds allowed) {t t' : Trace P}
+    (h : Trace.InsertsTrueAssumes allowed t t') (hv : Trace.AssertionsValid P I t') :
+    Trace.AssertionsValid P I t :=
+  h.assertionsValidFromP htrue (fun _ hw => hw) hv
 
 /-- Inserting true assumptions under some allowed factories inserts them under any larger set of
     allowed factories. -/

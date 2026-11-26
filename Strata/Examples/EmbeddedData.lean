@@ -13,6 +13,7 @@ public import Strata.Init
 /-- Embedded example files for use by downstream test suites. -/
 public def embeddedExampleFiles : Array (String × String) := #[
   ("AxiomRelevancePaths.core.st", include_str "../../Examples/AxiomRelevancePaths.core.st"),
+  ("CFGLoopFree.core.st", include_str "../../Examples/CFGLoopFree.core.st"),
   ("CFGNondet.core.st", include_str "../../Examples/CFGNondet.core.st"),
   ("CFGSimple.core.st", include_str "../../Examples/CFGSimple.core.st"),
   ("CSEPathSplits.core.st", include_str "../../Examples/CSEPathSplits.core.st"),
@@ -30,8 +31,8 @@ public def embeddedExampleFiles : Array (String × String) := #[
   ("dialects/Arith.dialect.st", include_str "../../Examples/dialects/Arith.dialect.st"),
   ("dialects/Bool.dialect.st", include_str "../../Examples/dialects/Bool.dialect.st"),
   ("expected/AxiomRelevancePaths.core.expected", include_str "../../Examples/expected/AxiomRelevancePaths.core.expected"),
+  ("expected/CFGSimple.cfgLoopElim.core.st", include_str "../../Examples/expected/CFGSimple.cfgLoopElim.core.st"),
   ("expected/CSEPathSplits.core.expected", include_str "../../Examples/expected/CSEPathSplits.core.expected"),
-  ("expected/DoubleTwice.callElim.core.expected", include_str "../../Examples/expected/DoubleTwice.callElim.core.expected"),
   ("expected/DoubleTwice.callElim.core.st", include_str "../../Examples/expected/DoubleTwice.callElim.core.st"),
   ("expected/DoubleTwice.inlineProcedures.core.expected", include_str "../../Examples/expected/DoubleTwice.inlineProcedures.core.expected"),
   ("expected/DoubleTwice.inlineProcedures.core.st", include_str "../../Examples/expected/DoubleTwice.inlineProcedures.core.st"),
@@ -43,14 +44,12 @@ public def embeddedExampleFiles : Array (String × String) := #[
   ("expected/IrrelevantAxioms.removeIrrelevantAxioms.core.expected", include_str "../../Examples/expected/IrrelevantAxioms.removeIrrelevantAxioms.core.expected"),
   ("expected/IrrelevantAxioms.removeIrrelevantAxioms.core.st", include_str "../../Examples/expected/IrrelevantAxioms.removeIrrelevantAxioms.core.st"),
   ("expected/LoopSimple.core.expected", include_str "../../Examples/expected/LoopSimple.core.expected"),
-  ("expected/LoopSimple.insertLoopInvariantAsserts.loopElim.core.expected", include_str "../../Examples/expected/LoopSimple.insertLoopInvariantAsserts.loopElim.core.expected"),
   ("expected/LoopSimple.insertLoopInvariantAsserts.loopElim.core.st", include_str "../../Examples/expected/LoopSimple.insertLoopInvariantAsserts.loopElim.core.st"),
   ("expected/ProcedureTypeError.core.expected", include_str "../../Examples/expected/ProcedureTypeError.core.expected"),
   ("expected/SafeBvOps.callElim.core.expected", include_str "../../Examples/expected/SafeBvOps.callElim.core.expected"),
   ("expected/SafeBvOps.callElim.core.st", include_str "../../Examples/expected/SafeBvOps.callElim.core.st"),
   ("expected/SimpleProc.core.expected", include_str "../../Examples/expected/SimpleProc.core.expected"),
   ("expected/TwoLoops.core.expected", include_str "../../Examples/expected/TwoLoops.core.expected"),
-  ("expected/TwoLoops.insertLoopInvariantAsserts.loopElim.core.expected", include_str "../../Examples/expected/TwoLoops.insertLoopInvariantAsserts.loopElim.core.expected"),
   ("expected/TwoLoops.insertLoopInvariantAsserts.loopElim.core.st", include_str "../../Examples/expected/TwoLoops.insertLoopInvariantAsserts.loopElim.core.st"),
   ("expected/TypeError.core.expected", include_str "../../Examples/expected/TypeError.core.expected")
 ]

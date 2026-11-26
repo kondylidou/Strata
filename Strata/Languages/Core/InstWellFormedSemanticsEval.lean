@@ -37,9 +37,11 @@ It also provides the factory-membership facts `coreFactory_boolNot`, `coreFactor
 `coreFactory_intSub` and `coreFactory_intMul`, sharing the generic `coreFactory_get?_of_mem`,
 and the operator expressions `coreIntLeOpExpr` / `coreIntAddOpExpr`.
 
-For operators with a concrete evaluator, `opInterp_of_concreteEval` says that every consistent
-model interprets the operator as its concrete evaluator computes, and `eval_app2_op` evaluates
-an operator applied to two values to its interpretation at them.
+For operators with a concrete evaluator, `opInterp_of_concreteEval_subst` says that every
+consistent model interprets the operator, at any instance of its type, as its concrete evaluator
+computes (`opInterp_of_concreteEval` at the declared type), and `eval_app2_op` evaluates
+an operator applied to two values to its interpretation at them; `eval_app2_op_of_sort` says
+that any operator of type `s → s → s` applied to two values of sort `s` evaluates to one.
 -/
 
 ---------------------------------------------------------------------
@@ -453,6 +455,38 @@ theorem coreFactory_WellFormedSemanticEval (f : Expression.Factory)
 
 open _root_.Lambda
 
+/-- **Interpretation of a concretely evaluated function at an instance of its type.**  If the
+    concrete evaluator of the function `name` maps the argument expressions `args`, well typed at
+    the input types of `name` instantiated by the type substitution `S`, to `res`, well typed at
+    the output type instantiated by `S`, every consistent model interprets `name` at that
+    instance and the argument denotations as the denotation of `res`. -/
+theorem opInterp_of_concreteEval_subst {factory : Lambda.Factory CoreLParams}
+    (model : Lambda.Interp factory) {name : String} {fn : Lambda.LFunc CoreLParams}
+    (hlookup : factory[name]? = some fn) (hname : fn.name.name = name)
+    {args : List Expression.Expr} {res : Expression.Expr}
+    (S : Lambda.Subst)
+    (heval : fn.concreteEval.bind (fun ce => ce coreLoc
+      (some (Lambda.LMonoTy.mkArrow' (fn.output.subst S)
+        ((fn.inputs.map Prod.snd).map (Lambda.LMonoTy.subst S)))) args) = some res)
+    (vt : Lambda.TyVarVal) (fv : Lambda.FreeVarVal CoreLParams model.tcInterp)
+    (h_args : List.Rel₂ (Lambda.LExpr.HasTypeA []) args
+      ((fn.inputs.map Prod.snd).map (Lambda.LMonoTy.subst S)))
+    (h_result : Lambda.LExpr.HasTypeA [] res (fn.output.subst S)) :
+    Lambda.LExpr.denote model.tcInterp model.opInterp fv vt .nil res _ h_result =
+      Lambda.SortDenote.applyArgs model.tcInterp
+        (model.opInterp name (Lambda.LSort.mkArrow
+          ((fn.output.subst S).substTyVars vt)
+          (((fn.inputs.map Prod.snd).map (Lambda.LMonoTy.subst S)).map
+            (Lambda.LMonoTy.substTyVars vt))))
+        (Lambda.denoteArgs model.tcInterp model.opInterp fv vt .nil args _ h_args) := by
+  obtain ⟨ceval, hce, heval⟩ := Option.bind_eq_some_iff.1 heval
+  have hget := Lambda.Factory.getElem?_some_getElem hlookup
+  have h_ic := model.interpConsistent.2 name (Lambda.Factory.getElem?_some_implies_mem hlookup)
+    ceval (by rw [hget]; exact hce)
+  rw [hget] at h_ic
+  rw [← hname]
+  exact h_ic vt fv coreLoc S args res heval h_args h_result
+
 /-- **Interpretation of a concretely evaluated function.**  If the concrete evaluator of the
     function `name` maps the well-typed argument expressions `args` to `res`, every consistent
     model interprets `name` at the argument denotations as the denotation of `res`. -/
@@ -472,17 +506,8 @@ theorem opInterp_of_concreteEval {factory : Lambda.Factory CoreLParams}
           ((fn.output.subst Lambda.Subst.empty).substTyVars vt)
           (((fn.inputs.map Prod.snd).map (Lambda.LMonoTy.subst Lambda.Subst.empty)).map
             (Lambda.LMonoTy.substTyVars vt))))
-        (Lambda.denoteArgs model.tcInterp model.opInterp fv vt .nil args _ h_args) := by
-  have hmem : name ∈ factory := Lambda.Factory.getElem?_some_implies_mem hlookup
-  have hget := Lambda.Factory.getElem?_some_getElem hlookup
-  cases hce : fn.concreteEval with
-  | none => rw [hce] at heval; cases heval
-  | some ceval =>
-    rw [hce, Option.bind_some] at heval
-    have h_ic := model.interpConsistent.2 name hmem ceval (by rw [hget]; exact hce)
-    rw [hget] at h_ic
-    rw [← hname]
-    exact h_ic vt fv coreLoc Lambda.Subst.empty args res heval h_args h_result
+        (Lambda.denoteArgs model.tcInterp model.opInterp fv vt .nil args _ h_args) :=
+  opInterp_of_concreteEval_subst model hlookup hname _ heval vt fv h_args h_result
 
 /-- **Binary operator evaluation.**  An operator annotated `a → b → c`, at ground types,
     applied to arguments with values `va` and `vb` evaluates to `w` when the model interprets
@@ -506,6 +531,38 @@ theorem eval_app2_op {f : Expression.Factory} (name : String) {m m' m'' : Expres
       some ⟨f.model.tcInterp, c.substTyVars f.tyVarVal, w⟩ := by
   rw [← hop]
   exact LExpr.denoteEval_app2_op_val (T := CoreLParams) ha hb hc hx hy
+
+/-- A semantic value of a sort `t` equal to `s` is the value of sort `s` it is cast from. -/
+private theorem SemValue.mk_cast {tc : TyConstrInterp} {s t : LSort} (h : t = s)
+    (val : SortDenote tc s) :
+    (⟨tc, t, cast (congrArg (SortDenote tc) h.symm) val⟩ : SemValue) = ⟨tc, s, val⟩ := by
+  subst h; rfl
+
+/-- **Binary operator evaluation at a sort.**  An operator annotated `s → s → s`, for a sort
+    `s`, applied to two expressions evaluating to values of the factory of sort `s`, evaluates
+    to a value of the factory of sort `s`, whatever the operator. -/
+theorem eval_app2_op_of_sort {f : Expression.Factory} (name : String)
+    {m m' m'' : ExpressionMetadata} {s : LSort} {σ : CoreStore} {x y : Expression.Expr}
+    {vx vy : Expression.Val} (hx : Expression.eval f σ x = some vx)
+    (hy : Expression.eval f σ y = some vy) (htx : vx.tc = f.model.tcInterp)
+    (hty : vy.tc = f.model.tcInterp) (hsx : vx.sort = s) (hsy : vy.sort = s) :
+    ∃ w, Expression.eval f σ (.app m (.app m' (.op m'' ⟨name, ()⟩
+        (some (LMonoTy.arrow s.toMonoTy (LMonoTy.arrow s.toMonoTy s.toMonoTy)))) x) y) =
+        some w ∧ w.tc = f.model.tcInterp ∧ w.sort = s := by
+  obtain ⟨tcx, sx, valx⟩ := vx
+  obtain ⟨tcy, sy, valy⟩ := vy
+  simp only at htx hty hsx hsy
+  subst htx hty hsy
+  subst hsx
+  have hg := LSort.toMonoTy_substTyVars f.tyVarVal sx
+  have hx' : Expression.eval f σ x = some ⟨f.model.tcInterp,
+      (sx.toMonoTy).substTyVars f.tyVarVal,
+      cast (congrArg (SortDenote f.model.tcInterp) hg.symm) valx⟩ := by rw [hx, SemValue.mk_cast hg]
+  have hy' : Expression.eval f σ y = some ⟨f.model.tcInterp,
+      (sx.toMonoTy).substTyVars f.tyVarVal,
+      cast (congrArg (SortDenote f.model.tcInterp) hg.symm) valy⟩ := by rw [hy, SemValue.mk_cast hg]
+  exact ⟨_, eval_app2_op (m := m) (m' := m') (m'' := m'') name (LSort.toMonoTy_isGround sx)
+    (LSort.toMonoTy_isGround sx) (LSort.toMonoTy_isGround sx) hx' hy' rfl, rfl, hg⟩
 
 end Core
 

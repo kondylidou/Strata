@@ -4,7 +4,8 @@
   SPDX-License-Identifier: Apache-2.0 OR MIT
 -/
 import Strata.Languages.Core.InterpreterReachCheck
-import Strata.Languages.Core.Logic.FactoryInterp
+import Strata.Languages.Core.FactoryInterp
+import Strata.Languages.Core.ProcedureProps
 import Strata.Languages.Core.InterpreterReplay
 import Strata.DL.Imperative.InterpreterConfig
 import Strata.DL.Imperative.InterpreterCFGProps
@@ -128,7 +129,7 @@ private def ffE : Expression.Expr := .boolConst default false
 def wProc : Procedure :=
   { header := { name := ⟨"w", ()⟩, typeArgs := [], inputs := [], outputs := [] },
     spec := { preconditions := [], postconditions := [] },
-    body := .structured [.cmd (.cmd (.assert "fail" ffE md))] }
+    body := .structured [.cmd (.cmd (.assert "fail" ffE md))] false }
 
 /-- The procedure table: `"w"` resolves to `wProc`. -/
 def wPi : String → Option Procedure := fun n => if n = "w" then some wProc else none
@@ -138,7 +139,7 @@ def wEnv : Imperative.IEnv Expression := .ofStore (fun _ => none) Core.Factory
 
 /-- The counterexample: the call, with an empty oracle. -/
 def wCex : CexA Expression Command :=
-  { cfg := .stmts [.cmd (.call "w" [] md)] wEnv, oracle := [] }
+  { cfg := .stmts [.cmd (.call "w" none [] md)] wEnv, oracle := [] }
 
 /-- The target: the callee's assert. -/
 def wTarget : AssertId Expression := { label := "fail", md := md }
@@ -149,8 +150,8 @@ private theorem wRefRun :
     ∃ evs final, CoreStepStarE wPi (wCex.cfg.abs M0) evs final ∧
       ∃ ev ∈ evs, RefFailure wTarget ev :=
   ⟨_, _, .step _ _ _ _ _ .step_stmts_cons
-    (.step _ _ _ _ _ (.step_seq_inner (.step_cmd (.call_sem (n := "w") (p := wProc)
-      (σAO := Calls.withOldSnapshots (Calls.inoutParams wProc.header) emptyStore) rfl
+    (.step _ _ _ _ _ (.step_seq_inner (.step_cmd (.call_sem (n := "w") (tyArgs := none) (p := wProc)
+      (σAO := Calls.withOldSnapshots (Calls.inoutParams wProc.header) emptyStore) rfl rfl
       ⟨[], [], .eval_none, .read_none, ⟨_, _, .init_none, .init_none, rfl⟩⟩
       (.structured (.step _ _ _ _ _ .step_block
         (.step _ _ _ _ _ (.step_block_body .step_stmts_cons)
@@ -180,45 +181,58 @@ theorem wGenuine_of_fragment :
   · simp [wCex, IConfig.abs, ConfigInFragment, BlockInFragment, StmtInFragment, CmdInFragment,
       Calls.getInputExprs]
   · simp only [List.mem_singleton, forall_eq]
-    refine ⟨.inl ⟨_, rfl, ?_⟩, by simp [wProc, ListMap.toList], by simp [wProc, ListMap.toList]⟩
+    refine ⟨rfl, .inl ⟨_, _, rfl, ?_⟩, by simp [wProc, ListMap.toList],
+      by simp [wProc, ListMap.toList]⟩
     exact ⟨⟨.const default _ rfl, rfl⟩, trivial⟩
   · simp [wEnv, IEnv.abs, InterpLang.absStore, IEnv.ofStore, IStore.get,
       IStore.ofStore, InterpLang.writesFind?_empty] at h
-  · refine ⟨?_, fun n p ss hp hss => ?_, fun n p g hp hg => ?_⟩
+  · refine ⟨?_, fun n _ p ss _ hp hss => ?_, fun n _ p g _ hp hg => ?_, fun n _ p hp hb => ?_⟩
     · refine ⟨?_, ?_⟩ <;> simp only [wCex, IConfig.abs, Config.noNondetGuards, Config.allCmds]
       · unfold Block.noNondetGuards Stmt.noNondetGuards Block.noNondetGuards
         rfl
       · unfold Block.allCmds Stmt.allCmds Block.allCmds
         rfl
-    · unfold wPi at hp
-      split at hp
-      · cases hp
+    · obtain ⟨p₀, hp₀, hinst⟩ := Option.bind_eq_some_iff.1 hp
+      unfold wPi at hp₀
+      split at hp₀
+      · cases hp₀
+        obtain ⟨-, rfl⟩ := (Procedure.instantiateTypes_of_typeArgs_nil rfl).1 hinst
         cases hss
         refine ⟨?_, ?_⟩
         · unfold Block.noNondetGuards Stmt.noNondetGuards Block.noNondetGuards
           rfl
         · unfold Block.allCmds Stmt.allCmds Block.allCmds
           rfl
-      · cases hp
-    · unfold wPi at hp
-      split at hp
-      · cases hp
+      · cases hp₀
+    · obtain ⟨p₀, hp₀, hinst⟩ := Option.bind_eq_some_iff.1 hp
+      unfold wPi at hp₀
+      split at hp₀
+      · cases hp₀
+        obtain ⟨-, rfl⟩ := (Procedure.instantiateTypes_of_typeArgs_nil rfl).1 hinst
         cases hg
-      · cases hp
+      · cases hp₀
+    · obtain ⟨p₀, hp₀, hinst⟩ := Option.bind_eq_some_iff.1 hp
+      unfold wPi at hp₀
+      split at hp₀
+      · cases hp₀
+        obtain ⟨-, rfl⟩ := (Procedure.instantiateTypes_of_typeArgs_nil rfl).1 hinst
+        cases hb
+      · cases hp₀
 
 /-- The callee with a CFG body: no formals, no spec clauses, one block `b` running
     `assert fail : false` and then `finish`. -/
 def wcProc : Procedure :=
   { header := { name := ⟨"wc", ()⟩, typeArgs := [], inputs := [], outputs := [] },
     spec := { preconditions := [], postconditions := [] },
-    body := .cfg (CFG.mk "b" [("b", BasicBlock.mk [.cmd (.assert "fail" ffE md)] (.finish md))]) }
+    body := .cfg (CFG.mk "b"
+      [("b", BasicBlock.mk [.cmd (.assert "fail" ffE md)] (.finish md) .empty)]) false }
 
 /-- The procedure table: `"wc"` resolves to `wcProc`. -/
 def wcPi : String → Option Procedure := fun n => if n = "wc" then some wcProc else none
 
 /-- The counterexample: the call of `wc`, with an empty oracle. -/
 def wcCex : CexA Expression Command :=
-  { cfg := .stmts [.cmd (.call "wc" [] md)] wEnv, oracle := [] }
+  { cfg := .stmts [.cmd (.call "wc" none [] md)] wEnv, oracle := [] }
 
 /-- A bare reference run of `wcCex.cfg`, stopped right after the call, emits the callee's failing
     assertion. -/
@@ -226,8 +240,9 @@ private theorem wcRefRun :
     ∃ evs final, CoreStepStarE wcPi (wcCex.cfg.abs M0) evs final ∧
       ∃ ev ∈ evs, RefFailure wTarget ev :=
   ⟨_, _, .step _ _ _ _ _ .step_stmts_cons
-    (.step _ _ _ _ _ (.step_seq_inner (.step_cmd (.call_sem (n := "wc") (p := wcProc)
-      (σAO := Calls.withOldSnapshots (Calls.inoutParams wcProc.header) emptyStore) rfl
+    (.step _ _ _ _ _ (.step_seq_inner (.step_cmd (.call_sem (n := "wc") (tyArgs := none)
+      (p := wcProc)
+      (σAO := Calls.withOldSnapshots (Calls.inoutParams wcProc.header) emptyStore) rfl rfl
       ⟨[], [], .eval_none, .read_none, ⟨_, _, .init_none, .init_none, rfl⟩⟩
       (.cfg (.step _ _ _ _ _ (.fetch rfl)
         (.step _ _ _ _ _ (.step_cmd (EvalCmdExtE.cmd_sem .eval_assert))
@@ -254,40 +269,53 @@ theorem wcGenuine_of_fragment :
   · simp [wcCex, IConfig.abs, ConfigInFragment, BlockInFragment, StmtInFragment, CmdInFragment,
       Calls.getInputExprs]
   · simp only [List.mem_singleton, forall_eq]
-    refine ⟨.inr ⟨_, rfl, ?_⟩, by simp [wcProc, ListMap.toList], by simp [wcProc, ListMap.toList]⟩
+    refine ⟨rfl, .inr (.inl ⟨_, _, rfl, ?_⟩), by simp [wcProc, ListMap.toList],
+      by simp [wcProc, ListMap.toList]⟩
     simp only [CFGInFragment, List.mem_singleton, forall_eq, CmdInFragment, TransferInFragment,
       and_true]
     exact ⟨.const default _ rfl, rfl⟩
   · simp [wEnv, IEnv.abs, InterpLang.absStore, IEnv.ofStore, IStore.get,
       IStore.ofStore, InterpLang.writesFind?_empty] at h
-  · refine ⟨?_, fun n p ss hp hss => ?_, fun n p g hp hg => ?_⟩
+  · refine ⟨?_, fun n _ p ss _ hp hss => ?_, fun n _ p g _ hp hg => ?_, fun n _ p hp hb => ?_⟩
     · refine ⟨?_, ?_⟩ <;> simp only [wcCex, IConfig.abs, Config.noNondetGuards, Config.allCmds]
       · unfold Block.noNondetGuards Stmt.noNondetGuards Block.noNondetGuards
         rfl
       · unfold Block.allCmds Stmt.allCmds Block.allCmds
         rfl
-    · unfold wcPi at hp
-      split at hp
-      · cases hp
+    · obtain ⟨p₀, hp₀, hinst⟩ := Option.bind_eq_some_iff.1 hp
+      unfold wcPi at hp₀
+      split at hp₀
+      · cases hp₀
+        obtain ⟨-, rfl⟩ := (Procedure.instantiateTypes_of_typeArgs_nil rfl).1 hinst
         cases hss
-      · cases hp
-    · unfold wcPi at hp
-      split at hp
-      · cases hp
+      · cases hp₀
+    · obtain ⟨p₀, hp₀, hinst⟩ := Option.bind_eq_some_iff.1 hp
+      unfold wcPi at hp₀
+      split at hp₀
+      · cases hp₀
+        obtain ⟨-, rfl⟩ := (Procedure.instantiateTypes_of_typeArgs_nil rfl).1 hinst
         cases hg
         exact CFG.allCmds_of_mem (by simp [Calls.CmdExtDeterministic, CmdDeterministic])
-      · cases hp
+      · cases hp₀
+    · obtain ⟨p₀, hp₀, hinst⟩ := Option.bind_eq_some_iff.1 hp
+      unfold wcPi at hp₀
+      split at hp₀
+      · cases hp₀
+        obtain ⟨-, rfl⟩ := (Procedure.instantiateTypes_of_typeArgs_nil rfl).1 hinst
+        cases hb
+      · cases hp₀
 
 /-- A CFG body whose block guard `x + 1 < y` is in the fragment. -/
 private def cProcIn : Procedure :=
   { wcProc with
-    body := .cfg (CFG.mk "b" [("b", BasicBlock.mk [] (.condGoto e1 "b" "c" md)),
-      ("c", BasicBlock.mk [.cmd (.assert "fail" ffE md)] (.finish md))]) }
+    body := .cfg (CFG.mk "b" [("b", BasicBlock.mk [] (.condGoto e1 "b" "c" md) .empty),
+      ("c", BasicBlock.mk [.cmd (.assert "fail" ffE md)] (.finish md) .empty)]) false }
 
 /-- A CFG body whose block guard is a division, outside the fragment. -/
 private def cProcOut : Procedure :=
   { wcProc with
-    body := .cfg (CFG.mk "b" [("b", BasicBlock.mk [] (.condGoto (.eq default e4 xE) "b" "b" md))]) }
+    body := .cfg (CFG.mk "b"
+      [("b", BasicBlock.mk [] (.condGoto (.eq default e4 xE) "b" "b" md) .empty)]) false }
 
 #guard procInFragment (inFragment Core.Factory) wcProc
 #guard procInFragment (inFragment Core.Factory) cProcIn

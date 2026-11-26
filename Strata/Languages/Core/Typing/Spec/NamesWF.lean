@@ -53,7 +53,7 @@ mutual
     declaration. -/
 def StatementNamesWF (P : Program) (fns : String → Prop) : Statement → Prop
   | .cmd (.cmd c) => CmdNamesWF fns c
-  | .cmd (.call _ _ _) => True
+  | .cmd (.call _ _ _ _) => True
   | .block _ body _ => StatementsNamesWF P fns body
   | .ite _ thenb elseb _ => StatementsNamesWF P fns thenb ∧ StatementsNamesWF P fns elseb
   | .loop _ _ _ body _ => StatementsNamesWF P fns body
@@ -77,8 +77,8 @@ def FuncNamesWF (fns : String → Prop) (f : Function) : Prop :=
 def ProcNamesWF (P : Program) (fns : String → Prop) (p : Procedure) : Prop :=
   (∀ x ∈ p.header.inputs.keys ++ p.header.outputs.keys, VarNotFunc fns x) ∧
   match p.body with
-  | .structured ss => StatementsNamesWF P fns ss
-  | .cfg _ => True
+  | .structured ss _ => StatementsNamesWF P fns ss
+  | .cfg _ _ | .abstract => True
 
 /-- The names in a declaration are valid, with `fns` the functions in scope before it. The
     functions of a recursive block are in scope for the whole block. -/

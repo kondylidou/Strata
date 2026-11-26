@@ -25,21 +25,25 @@ open Imperative
 variable {P : PureExpr}
   [DecidableEq P.Ident] [HasOldIdent P]
   {Hdr : Type} [DecidableEq Hdr] [Inhabited Hdr] [ProcedureHeader P Hdr]
+  [ProcedureTypeInstantiation P Hdr]
   [HasBool P] [HasBoolOps P] [HasFvar P] [HasFvars P]
 
 example {π π' : String → Option (Procedure P (CmdExt P) Hdr)}
-    (hπ : ∀ n p, π n = some p → π' n = some p)
+    (hπ : ∀ n tyArgs p, Calls.typeInstantiatedCallee π n tyArgs = some p →
+      Calls.typeInstantiatedCallee π' n tyArgs = some p)
     {fac : P.Factory} {σ σ' : SemanticStore P} {c : CmdExt P} {evs : Trace P}
     (h : EvalCmdExtE π fac σ c σ' evs) : EvalCmdExtE π' fac σ c σ' evs := by
   induction h using EvalCmdExtE.induct with
   | cmd_sem h => exact .cmd_sem h
-  | call_sem hn hentry _ hexit ih =>
-    rcases ih with ⟨ss, ρ', hss, rfl, hrun⟩ | ⟨g, ρ', hg, rfl, hrun⟩
-    · exact .call_sem (hπ _ _ hn) hentry
+  | call_sem hn hno hentry _ hexit ih =>
+    rcases ih with ⟨ss, ρ', _, hss, rfl, hrun⟩ | ⟨g, ρ', _, hg, rfl, hrun⟩
+    · exact .call_sem (hπ _ _ _ hn) hno hentry
         (hss ▸ .structured (hrun.imp fun _ _ _ _ _ ⟨_, h⟩ => h)) hexit
     · have hrun' := hrun.imp fun _ _ _ hs => hs.imp fun _ _ _ _ _ ⟨_, h⟩ => h
-      exact .call_sem (hπ _ _ hn) hentry
+      exact .call_sem (hπ _ _ _ hn) hno hentry
         (hg ▸ .cfg hrun') hexit
+  | call_abstract_sem hn hb hentry hhavoc hexit =>
+    exact .call_abstract_sem (hπ _ _ _ hn) hb hentry hhavoc hexit
 
 example {l CmdT : Type} {EventT : Type _} [BEq l] [HasVal P]
     {EvalCmd : EvalCmdParamE P CmdT EventT}

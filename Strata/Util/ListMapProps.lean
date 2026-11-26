@@ -44,6 +44,12 @@ theorem ListMap.keys_eq_map_fst (m : ListMap α β) : m.keys = m.map Prod.fst :=
   | nil => rfl
   | cons p t ih => cases p; simp [ListMap.keys, ih]
 
+/-- The key of an entry of a map is a key of the map. -/
+theorem ListMap.mem_keys_of_mem_toList {m : ListMap α β} {x : α} {t : β}
+    (h : (x, t) ∈ m.toList) : x ∈ m.keys := by
+  rw [ListMap.keys_eq_map_fst]
+  exact List.mem_map.2 ⟨(x, t), h, rfl⟩
+
 /-- Mapping over the values of a map keeps its keys. -/
 theorem ListMap.keys_map_values {γ : Type _} (m : ListMap α β) (g : α × β → γ) :
     @ListMap.keys α γ (List.map (fun x => (x.fst, g x)) m) = m.keys := by
@@ -56,6 +62,20 @@ theorem ListMap.values_eq_map_snd (m : ListMap α β) : m.values = m.map Prod.sn
   induction m with
   | nil => rfl
   | cons p t ih => cases p; simp [ListMap.values, ih]
+
+/-- The key and the value at a position of a map are the two parts of its entry there. -/
+theorem ListMap.keys_values_getElem?_of_toList {m : ListMap α β} {i : Nat} {x : α} {t : β}
+    (h : m.toList[i]? = some (x, t)) : m.keys[i]? = some x ∧ m.values[i]? = some t := by
+  rw [ListMap.keys_eq_map_fst, ListMap.values_eq_map_snd]
+  show (List.map Prod.fst m.toList)[i]? = some x ∧ (List.map Prod.snd m.toList)[i]? = some t
+  simp only [List.getElem?_map, h, Option.map_some, and_self]
+
+/-- Mapping `g` over the values of a map maps it over its list of values. -/
+theorem ListMap.values_map_snd {γ : Type _} (m : ListMap α β) (g : β → γ) :
+    ListMap.values (List.map (fun p => (p.1, g p.2)) m) = m.values.map g := by
+  induction m with
+  | nil => rfl
+  | cons p t ih => simp only [List.map_cons, ListMap.values, ih]
 
 
 /-- Every value in a map has a key. -/
@@ -772,6 +792,58 @@ theorem Map.find?_zip [DecidableEq α] {m : Map α β} {a : α} {b : β}
         refine ⟨c', i + 1, ?_, by simpa using hsnd, by simpa using hcs⟩
         simp [Map.find?, heq, hfind]
 
+/-- Every key of a zip of equal-length lists is found in it. -/
+theorem Map.find?_zip_isSome [DecidableEq α] :
+    ∀ (ks : List α) (vs : List β), ks.length = vs.length → ∀ x ∈ ks,
+      (Map.find? (ks.zip vs) x).isSome := by
+  intro ks
+  induction ks with
+  | nil => intro _ _ x hx; cases hx
+  | cons k ks ih =>
+    intro vs hl x hx
+    cases vs with
+    | nil => cases hl
+    | cons v vs =>
+      simp only [List.zip_cons_cons, Map.find?]
+      split
+      · rfl
+      · rename_i hne
+        simp only [List.length_cons, Nat.add_right_cancel_iff] at hl
+        rcases List.mem_cons.mp hx with rfl | hx
+        · exact absurd rfl hne
+        · exact ih vs hl x hx
+
+/-- What a zip of lists maps a key to is among its values. -/
+theorem Map.find?_zip_mem [DecidableEq α] :
+    ∀ (ks : List α) (vs : List β) x r, Map.find? (ks.zip vs) x = some r → r ∈ vs := by
+  intro ks
+  induction ks with
+  | nil => intro _ _ _ h; cases h
+  | cons k ks ih =>
+    intro vs x r h
+    cases vs with
+    | nil => cases h
+    | cons v vs =>
+      simp only [List.zip_cons_cons, Map.find?] at h
+      split at h
+      · cases h; exact List.mem_cons_self
+      · exact List.mem_cons_of_mem _ (ih vs x r h)
+
+/-- A key of a binding in a list is found in it. -/
+theorem Map.find?_isSome_of_mem [DecidableEq α] {x : α} {r : β} :
+    ∀ (l : List (α × β)), (x, r) ∈ l → (Map.find? l x).isSome := by
+  intro l
+  induction l with
+  | nil => intro h; cases h
+  | cons p l ih =>
+    intro h
+    obtain ⟨a, b⟩ := p
+    simp only [Map.find?]
+    split
+    · rfl
+    · rcases List.mem_cons.mp h with h | h
+      · cases h; contradiction
+      · exact ih h
 
 /-- `Map.erase` on a key not in the map is identity. -/
 theorem Map.erase_of_find?_none [DecidableEq α]

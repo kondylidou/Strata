@@ -7,9 +7,9 @@
 (defvar core-st-keywords
   '(    "var" "assume" "assert" "cover" "if" "else" "havoc" "invariant"
     "decreases" "while" "out" "inout" "call" "exit" "free" "ensures"
-    "requires" "spec" "procedure" "type" "inline" "const" "function"
-    "rec" "axiom" "lemma" "distinct" "datatype" "goto" "cfg" "old"
-    "forall" "exists" "program"))
+    "requires" "spec" "opaque" "procedure" "type" "inline" "const"
+    "function" "rec" "axiom" "lemma" "distinct" "datatype" "goto" "cfg"
+    "old" "forall" "exists" "program"))
 
 (defvar core-st-types
   '(    "bool" "int" "string" "regex" "real" "bv" "W1" "W8" "W16" "W32"
@@ -26,7 +26,8 @@
     "Sequence.build" "Sequence.contains" "Set.empty" "Set.contains"
     "str.len" "str.concat" "str.substr" "str.to.re" "str.in.re"
     "str.prefixof" "str.suffixof" "str.contains" "str.indexof"
-    "str.replace" "str.at" "str.lt" "str.le" "re.allchar" "re.all"
+    "str.replace" "str.at" "str.lt" "str.le" "str.to_code"
+    "str.from_code" "str.from_int" "str.to_int" "re.allchar" "re.all"
     "re.range" "re.concat" "re.*" "re.+" "re.loop" "re.union" "re.inter"
     "re.comp" "re.none" "Sequence.select" "Sequence.select!"
     "Sequence.update" "Sequence.update!" "Sequence.take"

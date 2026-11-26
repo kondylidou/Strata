@@ -14,6 +14,7 @@ import all Strata.DL.Lambda.Denote.LExprAnnotated
 import all Strata.DL.Lambda.LExprWF
 import Strata.DL.Lambda.LExprWFProps
 import Strata.DL.Lambda.LExprTProps
+import Strata.DL.Lambda.LTyProps
 import Strata.DL.Lambda.OperationalSemanticsProps
 
 /-!
@@ -23,8 +24,10 @@ Properties of `LExpr.denoteEval` (`Strata.DL.Lambda.LExprDenoteEval`) and of the
 definitions it uses.
 
 - `LSort.toMonoTy_injective` — a sort is determined by its monomorphic type
-- `LExpr.annotateFvars_congr`, `LExpr.annotateFvars_eq_self`,
-  `LExpr.mem_freeVars_annotateFvars` — annotating free variables
+- `LExpr.annotateFvars_congr`, `LExpr.annotateFvars_eq_self_of_none`,
+  `LExpr.annotateFvars_eq_self`, `LExpr.annotateFvars_eq_self_freeVars`,
+  `LExpr.mem_freeVars_annotateFvars` — annotating free
+  variables
 - `LExpr.denoteEval_eq_some_iff` — characterization
 - `LExpr.denoteEval_congr`, `LExpr.denoteEval_mono` — dependence on the store
 - `LExpr.denoteEval_fvar`, `LExpr.denoteEval_fvar_none`, `LExpr.denoteEval_boolConst` —
@@ -32,11 +35,13 @@ definitions it uses.
 - `LExpr.denoteEval_mapFvarNames` — renaming free variables
 - `LExpr.denoteEval_substFvarsBy` — substituting variables or Boolean literals holding the
   values of free variables
+- `LExpr.denoteEval_substFvarsBy_eval` — substituting expressions that evaluate to the
+  values of the variables they replace
 - `LExpr.denoteEval_of_hasTypeA` — a well-typed expression evaluates
 - `LExpr.denoteEval_of_isValue` — a well-typed value (`isValue`) denotes one semantic
   value in every store
-- `LExpr.denoteEval_ite_iff`, `LExpr.denoteEval_app_op_bool_iff`, `LExpr.denoteEval_app2_op`
-  — conditionals and operator applications
+- `LExpr.denoteEval_ite_iff`, `LExpr.denoteEval_app_op_bool_iff`, `LExpr.denoteEval_app2_op`,
+  `LExpr.denoteEval_app2_op_int_inv` — conditionals and operator applications
 - `LExpr.denoteEval_const`, `LExpr.denoteEval_eq_true`, `LExpr.denoteEval_eq_false` —
   literals and equality
 - `LExpr.denoteEval_replaceMetadata1`, `LExpr.denoteEvalResult_replaceMetadata1`,
@@ -133,16 +138,17 @@ theorem LExpr.annotateFvars_congr [DecidableEq T.IDMeta]
     simp only [annotateFvars]
     rw [iha (fun x ty hx => h x ty (.inl hx)), ihb (fun x ty hx => h x ty (.inr hx))]
 
-/-- Annotating with annotations that every free-variable occurrence of `e` already carries
+/-- Annotating with annotations that agree with every annotation `e` carries, or give none,
     leaves `e` unchanged. -/
-theorem LExpr.annotateFvars_eq_self [DecidableEq T.IDMeta]
+theorem LExpr.annotateFvars_eq_self_of_none [DecidableEq T.IDMeta]
     {ann : Identifier T.IDMeta → Option LMonoTy} (e : LExpr T.mono)
-    (h : ∀ x ty, (x, ty) ∈ e.freeVars → ∃ τ, ty = some τ ∧ ann x = some τ) :
+    (h : ∀ x ty, (x, ty) ∈ e.freeVars → ann x = none ∨ ann x = ty) :
     e.annotateFvars ann = e := by
   induction e with
   | fvar m x ty =>
-    obtain ⟨τ, rfl, hx⟩ := h x ty (by simp [LExpr.freeVars])
-    simp [annotateFvars, hx]
+    simp only [annotateFvars]
+    rcases h x ty (by simp [LExpr.freeVars]) with h | h <;> rw [h]
+    cases ty <;> rfl
   | const | op | bvar => rfl
   | abs m n ty e ih => simp only [annotateFvars]; rw [ih (by simpa [LExpr.freeVars] using h)]
   | quant m k n ty tr e ihtr ihe =>
@@ -162,6 +168,58 @@ theorem LExpr.annotateFvars_eq_self [DecidableEq T.IDMeta]
     simp only [LExpr.freeVars, List.mem_append] at h
     simp only [annotateFvars]
     rw [iha (fun x ty hx => h x ty (.inl hx)), ihb (fun x ty hx => h x ty (.inr hx))]
+
+/-- Annotating with annotations that every free-variable occurrence of `e` already carries
+    leaves `e` unchanged. -/
+theorem LExpr.annotateFvars_eq_self [DecidableEq T.IDMeta]
+    {ann : Identifier T.IDMeta → Option LMonoTy} (e : LExpr T.mono)
+    (h : ∀ x ty, (x, ty) ∈ e.freeVars → ∃ τ, ty = some τ ∧ ann x = some τ) :
+    e.annotateFvars ann = e :=
+  LExpr.annotateFvars_eq_self_of_none e fun x ty hx => by
+    obtain ⟨τ, rfl, hann⟩ := h x ty hx
+    exact .inr hann
+
+/-- If annotating with `ann` leaves `e` unchanged, every free-variable occurrence of `e` carries
+    the annotation `ann` gives it, when `ann` gives one. -/
+theorem LExpr.annotateFvars_eq_self_freeVars [DecidableEq T.IDMeta]
+    {ann : Identifier T.IDMeta → Option LMonoTy} :
+    ∀ {e : LExpr T.mono}, e.annotateFvars ann = e →
+      ∀ y a, (y, a) ∈ LExpr.freeVars e → ann y = none ∨ ann y = a := by
+  intro e
+  induction e with
+  | const | op | bvar => intro _ y a hy; simp [LExpr.freeVars] at hy
+  | fvar m x ty =>
+    intro h y a hy
+    simp only [LExpr.freeVars, List.mem_singleton, Prod.mk.injEq] at hy
+    obtain ⟨rfl, rfl⟩ := hy
+    simp only [LExpr.annotateFvars, LExpr.fvar.injEq, true_and] at h
+    cases hx : ann y with
+    | none => exact .inl rfl
+    | some t => rw [hx] at h; exact .inr h
+  | abs _ _ _ _ ih =>
+    intro h y a hy
+    simp only [LExpr.annotateFvars, LExpr.abs.injEq] at h
+    exact ih h.2.2.2 y a hy
+  | quant _ _ _ _ _ _ ih₁ ih₂ =>
+    intro h y a hy
+    simp only [LExpr.annotateFvars, LExpr.quant.injEq] at h
+    simp only [LExpr.freeVars, List.mem_append] at hy
+    exact hy.elim (ih₁ h.2.2.2.2.1 y a) (ih₂ h.2.2.2.2.2 y a)
+  | app _ _ _ ih₁ ih₂ =>
+    intro h y a hy
+    simp only [LExpr.annotateFvars, LExpr.app.injEq] at h
+    simp only [LExpr.freeVars, List.mem_append] at hy
+    exact hy.elim (ih₁ h.2.1 y a) (ih₂ h.2.2 y a)
+  | eq _ _ _ ih₁ ih₂ =>
+    intro h y a hy
+    simp only [LExpr.annotateFvars, LExpr.eq.injEq] at h
+    simp only [LExpr.freeVars, List.mem_append] at hy
+    exact hy.elim (ih₁ h.2.1 y a) (ih₂ h.2.2 y a)
+  | ite _ _ _ _ ih₁ ih₂ ih₃ =>
+    intro h y a hy
+    simp only [LExpr.annotateFvars, LExpr.ite.injEq] at h
+    simp only [LExpr.freeVars, List.mem_append] at hy
+    exact hy.elim (fun hy => hy.elim (ih₁ h.2.1 y a) (ih₂ h.2.2.1 y a)) (ih₃ h.2.2.2 y a)
 
 /-- Annotation keeps the free-variable names, and annotates every free variable `x`
 whose `ann x` is defined with it. -/
@@ -211,6 +269,62 @@ theorem LSort.toMonoTy_isGround (s : LSort) : s.toMonoTy.IsGround := by
 theorem LMonoTy.IsGround.substTyVars_eq {τ : LMonoTy} (h : τ.IsGround) (ρ ρ' : TyVarVal) :
     τ.substTyVars ρ = τ.substTyVars ρ' := by
   rw [← h, LSort.toMonoTy_substTyVars, LSort.toMonoTy_substTyVars]
+
+/-- A type constructor applied to ground types is ground. -/
+private theorem LMonoTy.IsGround.tcons {name : String} {args : List LMonoTy}
+    (h : ∀ a ∈ args, a.IsGround) : (LMonoTy.tcons name args).IsGround := by
+  have hmap : ∀ as : List LMonoTy, (∀ a ∈ as, a.IsGround) →
+      LSort.toMonoTy.map (LMonoTy.substTyVars.map refTyVarVal as) = as := by
+    intro as
+    induction as with
+    | nil => intro _; rfl
+    | cons a rest ih =>
+      intro hg
+      simp only [LMonoTy.substTyVars.map, LSort.toMonoTy.map, List.cons.injEq]
+      exact ⟨hg a List.mem_cons_self,
+        ih (fun b hb => hg b (List.mem_cons_of_mem _ hb))⟩
+  simp only [LMonoTy.IsGround, LMonoTy.substTyVars, LSort.toMonoTy, LMonoTy.tcons.injEq,
+    true_and]
+  exact hmap args h
+
+/-- Substituting for the free type variables of a type, ground types for all of them, gives a
+    ground type. -/
+theorem LMonoTy.subst_isGround {S : Subst} {ty : LMonoTy}
+    (h : ∀ a ∈ LMonoTy.freeVars ty, (LMonoTy.subst S (.ftvar a)).IsGround) :
+    (LMonoTy.subst S ty).IsGround := by
+  induction ty with
+  | ftvar x => exact h x (by simp only [LMonoTy.freeVars, List.mem_singleton])
+  | bitvec n =>
+    rw [LMonoTy.subst_bitvec]
+    rfl
+  | tcons name args ih =>
+    rw [LMonoTy.subst_tcons, LMonoTys.subst_eq_map]
+    apply LMonoTy.IsGround.tcons
+    intro a ha
+    obtain ⟨b, hb, rfl⟩ := List.mem_map.1 ha
+    refine ih b hb (fun v hv => h v ?_)
+    exact LMonoTys.freeVars_mem_subset hb hv
+
+/-- A type whose free type variables are sent by `σ` and then by `S` to ground types is ground
+    after `σ` and then `S` are applied. -/
+theorem LMonoTy.subst_subst_isGround {S σ : Subst} {ty : LMonoTy}
+    (h : ∀ a ∈ LMonoTy.freeVars ty,
+      (LMonoTy.subst S (LMonoTy.subst σ (.ftvar a))).IsGround) :
+    (LMonoTy.subst S (LMonoTy.subst σ ty)).IsGround := by
+  induction ty with
+  | ftvar x => exact h x (by simp only [LMonoTy.freeVars, List.mem_singleton])
+  | bitvec n =>
+    rw [LMonoTy.subst_bitvec, LMonoTy.subst_bitvec]
+    rfl
+  | tcons name args ih =>
+    rw [LMonoTy.subst_tcons, LMonoTys.subst_eq_map, LMonoTy.subst_tcons,
+      LMonoTys.subst_eq_map]
+    apply LMonoTy.IsGround.tcons
+    intro a ha
+    obtain ⟨b, hb, rfl⟩ := List.mem_map.1 ha
+    obtain ⟨c, hc, rfl⟩ := List.mem_map.1 hb
+    refine ih c hc (fun v hv => h v ?_)
+    exact LMonoTys.freeVars_mem_subset hc hv
 
 /-! ### Characterization -/
 
@@ -1177,6 +1291,112 @@ theorem LExpr.denoteEval_substFvarsBy {M : ModeledFactory T} {σ σ' : ValStore 
     refine eq_of_heq ((denote_heq_of_eq hann hτ' (LExpr.HasTypeA_substFvarsBy htc hτ)).trans ?_)
     exact heq_of_eq (denote_substFvarsBy look' .nil htc hden hfv hτ _)
 
+/-- **Substituting expressions that evaluate to the values of the variables they replace.**
+    Substituting, for free variables of `e`, expressions that evaluate in `σ'` to the values
+    the variables have in `σ`, preserves evaluation, when the remaining free variables have the
+    same values. -/
+theorem LExpr.denoteEval_substFvarsBy_eval {M : ModeledFactory T} {σ σ' : ValStore T}
+    (look : Identifier T.IDMeta → Option (LExpr T.mono)) (e : LExpr T.mono)
+    (hlook : ∀ x ty r, (x, ty) ∈ e.freeVars → look x = some r →
+      ∃ w, σ x = some w ∧ r.denoteEval M σ' = some w)
+    (hrest : ∀ x ty, (x, ty) ∈ e.freeVars → look x = none → σ' x = σ x) :
+    (e.substFvarsBy look).denoteEval M σ' = e.denoteEval M σ := by
+  have hdef : σ'.Defines M.model.tcInterp (e.substFvarsBy look) ↔ σ.Defines M.model.tcInterp e := by
+    simp only [ValStore.Defines, getVars_eq_freeVars_idents, List.mem_map, Prod.exists,
+      exists_and_right, exists_eq_right, forall_exists_index]
+    constructor
+    · intro hd x ty hx
+      cases hl : look x with
+      | none =>
+        rw [← hrest x ty hx hl]
+        exact hd x ty ((LExpr.mem_freeVars_substFvarsBy_of hx).1 hl)
+      | some r =>
+        obtain ⟨w, hw, hr⟩ := hlook x ty r hx hl
+        exact ⟨w, hw, LExpr.denoteEval_tc hr⟩
+    · intro hd x ty hx
+      rcases LExpr.mem_freeVars_substFvarsBy hx with ⟨hx', hl⟩ | ⟨y, tyy, r, hy, hl, hr⟩
+      · rw [hrest x ty hx' hl]; exact hd x ty hx'
+      · obtain ⟨w, -, hrv⟩ := hlook y tyy r hy hl
+        exact LExpr.denoteEval_defines hrv x (LExpr.mem_getVars_of_mem_freeVars hr)
+  apply Option.ext
+  intro v
+  rw [LExpr.denoteEval_eq_some_iff, LExpr.denoteEval_eq_some_iff, hdef]
+  apply and_congr_right
+  intro hd
+  let look' : Identifier T.IDMeta → Option (LExpr T.mono) :=
+    fun x => (look x).map (·.annotateFvars σ'.ann)
+  have hann :
+      (e.substFvarsBy look).annotateFvars σ'.ann = (e.annotateFvars σ.ann).substFvarsBy look' :=
+    LExpr.annotateFvars_substFvarsBy look σ.ann σ'.ann e fun x ty hx hl => by
+      simp [ValStore.ann, hrest x ty hx hl]
+  -- A substituted occurrence: its annotation is the sort of its value, and the annotated
+  -- replacement has that type and denotes that value.
+  have hocc : ∀ x tyo r', (x, tyo) ∈ (e.annotateFvars σ.ann).freeVars → look' x = some r' →
+      ∃ τ, ∃ h : r'.HasTypeA [] τ, τ.IsGround ∧ tyo = some τ ∧
+        σ x = some ⟨M.model.tcInterp, τ.substTyVars M.tyVarVal,
+          letI := M.model.allInhabited
+          LExpr.denote M.model.tcInterp M.model.opInterp (σ'.fvarVal M.model.tcInterp)
+            M.tyVarVal .nil r' τ h⟩ := by
+    intro x tyo r' hx hl
+    obtain ⟨⟨ty', hx'⟩, hann'⟩ := LExpr.mem_freeVars_annotateFvars hx
+    simp only [look', Option.map_eq_some_iff] at hl
+    obtain ⟨r, hl, rfl⟩ := hl
+    obtain ⟨w, hw, hrv⟩ := hlook x ty' r hx' hl
+    obtain ⟨-, τ, h, hg, rfl⟩ := LExpr.denoteEval_eq_some_iff.mp hrv
+    refine ⟨τ, h, hg, ?_, hw⟩
+    have := hann' (LExpr.denoteEvalResult M σ' r τ h).sort.toMonoTy (by simp [ValStore.ann, hw])
+    rw [this]
+    simp only [LExpr.denoteEvalResult]
+    rw [LMonoTy.IsGround.substTyVars_eq hg M.tyVarVal refTyVarVal, hg]
+  have htc : ∀ x tyo r', (x, tyo) ∈ (e.annotateFvars σ.ann).freeVars → look' x = some r' →
+      ∀ Δ', LExpr.typeCheck Δ' r' = tyo := by
+    intro x tyo r' hx hl Δ'
+    obtain ⟨τ, h, -, rfl, -⟩ := hocc x tyo r' hx hl
+    rw [typeCheck_of_lcAt (HasTypeA_nil_lcAt h)]
+    exact LExpr.HasTypeA_to_typeCheck h
+  have htyeq : LExpr.typeCheck [] ((e.substFvarsBy look).annotateFvars σ'.ann) =
+      LExpr.typeCheck [] (e.annotateFvars σ.ann) := by
+    rw [hann]; exact LExpr.typeCheck_substFvarsBy look' _ [] htc
+  letI := M.model.allInhabited
+  have hden : ∀ x ty r', (x, some ty) ∈ (e.annotateFvars σ.ann).freeVars → look' x = some r' →
+      ∀ Δ' (bv' : BVarVal M.model.tcInterp M.tyVarVal Δ') (hr : r'.HasTypeA Δ' ty),
+        LExpr.denote M.model.tcInterp M.model.opInterp (σ'.fvarVal M.model.tcInterp) M.tyVarVal
+          bv' r' ty hr = σ.fvarVal M.model.tcInterp x (ty.substTyVars M.tyVarVal) := by
+    intro x ty r' hx hl Δ' bv' hr
+    obtain ⟨τ, h, -, hty, hw⟩ := hocc x _ r' hx hl
+    simp only [Option.some.injEq] at hty
+    subst hty
+    rw [denote_irrel_of_lcAt M.model.tcInterp M.model.opInterp (σ'.fvarVal M.model.tcInterp)
+      M.tyVarVal (HasTypeA_nil_lcAt h) hr h bv' .nil]
+    simp only [ValStore.fvarVal, hw, Option.bind_some]
+    rw [SemValue.read_self]
+    rfl
+  have hfv : ∀ x ty, (x, some ty) ∈ (e.annotateFvars σ.ann).freeVars → look' x = none →
+      σ'.fvarVal M.model.tcInterp x (ty.substTyVars M.tyVarVal) =
+        σ.fvarVal M.model.tcInterp x (ty.substTyVars M.tyVarVal) := by
+    intro x ty hx hl
+    obtain ⟨⟨ty', hx'⟩, -⟩ := LExpr.mem_freeVars_annotateFvars hx
+    simp only [look', Option.map_eq_none_iff] at hl
+    simp [ValStore.fvarVal, hrest x ty' hx' hl]
+  constructor
+  · rintro ⟨τ, hτ, hg, rfl⟩
+    have hτ' : (e.annotateFvars σ.ann).HasTypeA [] τ := LExpr.typeCheck_to_HasTypeA
+      (htyeq ▸ LExpr.HasTypeA_to_typeCheck hτ)
+    refine ⟨τ, hτ', hg, ?_⟩
+    unfold LExpr.denoteEvalResult
+    congr 1
+    refine eq_of_heq ((denote_heq_of_eq hann hτ (LExpr.HasTypeA_substFvarsBy htc hτ')).trans ?_)
+    exact heq_of_eq (denote_substFvarsBy look' .nil htc hden hfv hτ' _)
+  · rintro ⟨τ, hτ, hg, rfl⟩
+    have hτ' : ((e.substFvarsBy look).annotateFvars σ'.ann).HasTypeA [] τ :=
+      LExpr.typeCheck_to_HasTypeA (htyeq.symm ▸ LExpr.HasTypeA_to_typeCheck hτ)
+    refine ⟨τ, hτ', hg, ?_⟩
+    unfold LExpr.denoteEvalResult
+    congr 1
+    symm
+    refine eq_of_heq ((denote_heq_of_eq hann hτ' (LExpr.HasTypeA_substFvarsBy htc hτ)).trans ?_)
+    exact heq_of_eq (denote_substFvarsBy look' .nil htc hden hfv hτ _)
+
 end EvalSubst
 
 /-! ### Compound expressions -/
@@ -1565,6 +1785,24 @@ theorem LExpr.denoteEval_app2_op_int {M : ModeledFactory T} {σ : ValStore T}
         (M.model.opInterp o.name (LSort.mkArrow (c.substTyVars M.tyVarVal) [.int, .int])
           : Int → Int → SortDenote M.model.tcInterp (c.substTyVars M.tyVarVal)) a b⟩ :=
   LExpr.denoteEval_app2_op_val (a := .int) (b := .int) rfl rfl hc hx hy
+
+/-- **Inversion of a binary integer operator.**  An operator annotated `int → int → c` applied to
+    two arguments evaluates only when both arguments evaluate to integers. -/
+theorem LExpr.denoteEval_app2_op_int_inv
+    {M : ModeledFactory T} {σ : ValStore T} {m m' m'' : T.Metadata} {o : Identifier T.IDMeta}
+    {x y : LExpr T.mono} {c : LMonoTy} {v : SemValue}
+    (h : (LExpr.app m (.app m' (.op m'' o (some (LMonoTy.arrow .int (LMonoTy.arrow .int c)))) x)
+        y).denoteEval M σ = some v) :
+    ∃ a b, x.denoteEval M σ = some (SemValue.ofInt M.model.tcInterp a) ∧
+      y.denoteEval M σ = some (SemValue.ofInt M.model.tcInterp b) := by
+  obtain ⟨hd, τ, ht, -, -⟩ := LExpr.denoteEval_eq_some_iff.mp h
+  obtain ⟨ay, hf, hy⟩ := HasTypeA.app_inv ht
+  obtain ⟨ax, hop, hx⟩ := HasTypeA.app_inv hf
+  cases HasTypeA.op_inv hop
+  exact ⟨_, _, LExpr.denoteEval_eq_ofInt_iff.mpr
+      ⟨hd.mono fun z ty hz => ⟨ty, by simp [LExpr.freeVars, hz]⟩, hx, rfl⟩,
+    LExpr.denoteEval_eq_ofInt_iff.mpr
+      ⟨hd.mono fun z ty hz => ⟨ty, by simp [LExpr.freeVars, hz]⟩, hy, rfl⟩⟩
 
 /-- A well-typed value (`isValue`) at a ground type `τ` evaluates, in every store, to one
 semantic value of the model's interpretation whose sort is `τ`. -/

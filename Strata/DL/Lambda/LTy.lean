@@ -133,6 +133,14 @@ def LMonoTy.getArrowArgs (t: LMonoTy) : List LMonoTy :=
   | .arrow t1 t2 => t1 :: t2.getArrowArgs
   | _ => []
 
+/-- Peel at most `n` argument types off a curried arrow type, returning them
+    with what remains: `splitArrows 1 (a → b → c) = ([a], b → c)`. -/
+def LMonoTy.splitArrows : Nat → LMonoTy → LMonoTys × LMonoTy
+  | n + 1, .tcons "arrow" [dom, cod] =>
+    let (doms, res) := LMonoTy.splitArrows n cod
+    (dom :: doms, res)
+  | _, ty => ([], ty)
+
 /-- Return `some (dom, cod)` if the type is an arrow, `none` otherwise. -/
 def LMonoTy.isArrow : LMonoTy → Option (LMonoTy × LMonoTy)
   | .tcons "arrow" [dom, cod] => some (dom, cod)
@@ -159,6 +167,12 @@ inductive LTy : Type where
   deriving Inhabited, Repr
 
 abbrev LTys := List LTy
+
+/-- The placeholder that stands for an erased type. -/
+@[expose] def LMonoTy.erased : LMonoTy := .ftvar ""
+
+/-- The placeholder that stands for an erased type scheme. -/
+@[expose] def LTy.erased : LTy := .forAll [] LMonoTy.erased
 
 /-- Apply a function to the body of a type scheme. -/
 @[expose] def mapLTyTys (f : LMonoTy → LMonoTy) : LTy → LTy

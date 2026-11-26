@@ -9,6 +9,7 @@ public import Strata.DL.Imperative.PureExpr
 public import Strata.DL.Imperative.PureExprProps
 public import Strata.DL.Imperative.HasVars
 public import Strata.DL.Imperative.MetaData
+public import Strata.DL.Imperative.MetaDataProps
 
 public import Strata.DL.Imperative.CmdEval
 public import Strata.DL.Imperative.CmdProps
@@ -53,6 +54,7 @@ public import Strata.DL.Imperative.Analysis.VerdictProps
 public import Strata.DL.Imperative.Analysis.DeductiveVerification
 public import Strata.DL.Imperative.Analysis.DeductiveVerificationProps
 public import Strata.DL.Imperative.Logic.HoareTemplate
+public import Strata.DL.Imperative.Logic.HoareTotalTemplate
 
 public import Strata.DL.Imperative.KleeneStmt
 public import Strata.DL.Imperative.KleeneStmtSemantics
@@ -72,6 +74,7 @@ public import Strata.DL.Imperative.InterpreterCFGKleeneFollows
 
 public import Strata.DL.Imperative.StmtExtendCallBridge
 public import Strata.DL.Imperative.StmtExtendCallBridgeProps
+public import Strata.DL.Imperative.PassiveVCGen
 
 public import Strata.DL.Imperative.SMTUtils
 public import Strata.DL.Imperative.InterpreterReplayTactics

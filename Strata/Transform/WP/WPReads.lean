@@ -248,6 +248,16 @@ theorem wreads_kExpr (h : y ∈ wreads (kExpr κ)) : y ∈ RE.vars κ := by
   cases κ <;> simp_all [kExpr, wreads, RE.vars, WExpr.not, WExpr.and]
 
 include iHash in
+/-- A marker assumption `κ ⟹ a` (`kMarkImp`) reads the variables of `κ` and what `a` reads. -/
+theorem wreads_kMarkImp {a : WExpr P} (h : y ∈ wreads (kMarkImp κ a)) :
+    y ∈ RE.vars κ ∨ y ∈ wreads a := by
+  simp only [kMarkImp, wreads, List.mem_append] at h
+  rcases h with (h | h) | h
+  · exact .inl (wreads_kExpr (wreads_not (wreads_not h)))
+  · exact .inr h
+  · exact .inl (wreads_kExpr (wreads_not (wreads_not (wreads_not h))))
+
+include iHash in
 /-- `ite(κ, t, e)` reads the variables of `κ` and what `t` and `e` read. -/
 theorem wreads_kIte {t e : WExpr P} (h : y ∈ wreads (kIte κ t e)) :
     y ∈ RE.vars κ ∨ y ∈ wreads t ∨ y ∈ wreads e := by
@@ -400,9 +410,16 @@ include iDec iBool iFvar iSubst iId iLId iHash iW
 theorem stmtReads_cmd (Lc : List P.Ident) (κ : RE P) (d : Nat) (f : Bool) (c : CmdExt P) :
     StmtReads Lc κ d f (.cmd c) := by
   rintro st a st' - h S hS - - - - - -
-  unfold wpStmt at h
   rcases c with ((⟨x, ty, e | _, md⟩ | ⟨x, e | _, md⟩ | ⟨l, e, md⟩ | ⟨l, e, md⟩ | ⟨l, e, md⟩) |
     ⟨p, args, md⟩)
+  all_goals try
+    rw [wpStmt_init_run] at h
+    split at h
+    rotate_left
+    · cases h
+      exact readsOK_nil rfl rfl
+    simp only [wpStmt, keepInit, pure_bind] at h
+  all_goals try unfold wpStmt at h
   all_goals try first | cases h | (cases f; cases h; exact readsOK_nil rfl rfl)
   all_goals wp_inv h
   · split at h <;> wp_inv h <;> obtain ⟨⟨⟨we, rd⟩, s1⟩, h1, ⟨n, s2⟩, h2, rfl, hst⟩ := h
@@ -426,8 +443,8 @@ theorem stmtReads_cmd (Lc : List P.Ident) (κ : RE P) (d : Nat) (f : Bool) (c : 
   all_goals obtain ⟨⟨⟨we, rd⟩, s1⟩, h1, rfl, hst⟩ := h
   all_goals
     rd_ok hst st' s1
-    grind [wRen_reads h1, Block.freeVars, Stmt.freeVars, Stmt.WellScoped, RE.vars, kImp, wreads,
-      → wreads_kIte]
+    grind [wRen_reads h1, Block.freeVars, Stmt.freeVars, Stmt.WellScoped, RE.vars, kImp, kAssume,
+      wreads, → wreads_kIte, → wreads_kMarkImp]
 
 /-! ## Exits and statements without a rule -/
 
@@ -475,7 +492,7 @@ private theorem init_decl (h : (wpStmt κ d f s).run st = .ok (a, st')) (hf : f 
     simp only [Stmt.topInits, List.mem_singleton, List.not_mem_nil] at hx
   all_goals
     subst hx hf
-    unfold wpStmt at h
+    simp only [wpStmt, keepInit, pure_bind] at h
     wp_inv h
   · obtain ⟨⟨⟨we, rd⟩, s0⟩, h0, ⟨n', s1⟩, h1, h⟩ := h
     obtain ⟨-, -, -, hkeep⟩ := wRen_run h0

@@ -66,7 +66,7 @@ private def interpretResult (p : StrataDDM.SourcedProgram) : String :=
   match Program.Procedure.find? prog ⟨"caller", ()⟩ with
   | none => "no caller"
   | some caller =>
-    match Core.Program.interpretEntries prog [caller] 1000 with
+    match Core.Program.interpretEntries .execute prog [caller] 1000 with
     | .error e => toString e.message
     | .ok o => s!"errors={o.errors.toList.map fun (n, e) => s!"{n}: {Std.format e}"} \
                   failures={o.diagnostics.size + o.unmapped.size}"
@@ -213,7 +213,7 @@ info: procedure caller ()
   var tmp_a_1 : int := a;
   var old_a_2 : int := a;
   havoc a;
-  assume [callElimAssume_inc_ensures_0_3]: a == int.add(old_a_2, 1);
+  assume [$__callElimAssume_inc_ensures_0_3]: a == int.add(old_a_2, 1);
   assert [a_is_1]: a == 1;
 };
 -/

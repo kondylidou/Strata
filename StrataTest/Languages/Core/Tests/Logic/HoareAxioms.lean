@@ -25,6 +25,9 @@ A constant `c` with no definition, whose value differs from model to model, an a
 - `witness_contract`: the same fact in the form of the `contract` field of
   `Core.Specification.ProcedureAssertsValidOnTraces.denote`, from
   `Core.Specification.contract_of_contractTriple`.
+- `witness_procedureAssertsValidOnTraces`: `Witness` satisfies
+  `Core.Specification.ProcedureAssertsValidOnTraces.denote`, from
+  `Core.Specification.procedureAssertsValidOnTraces_of_contractTriple`.
 
 ## The position of a declaration decides
 
@@ -40,6 +43,14 @@ before the procedure and once after it.
 
 - `apart_entry`: with `distinct [a, b]` before the procedure, the constants `a` and
   `b` have different values at every entry the contract triple admits.
+
+## The callee's axioms at a call
+
+- `callee_axioms_at_call`: the entry assumption of a caller gives the axioms of a callee
+  declared before it in every store, which is the premise `haxioms` of
+  `Procedure.call_of_contract`.
+- `caller_axioms_invariant`: the caller's entry assumption holds after its statements
+  as before them.
 -/
 
 open StrataDDM (Program)
@@ -91,7 +102,8 @@ private theorem ensures_among_axioms :
     hold: a model may interpret `c` as `0`. -/
 theorem witness_meets_contract :
     Core.Logic.Hoare.Procedure.contractTriple axiomAST testParams "Witness" := by
-  refine Core.Logic.Hoare.Procedure.contractTriple_of_core_typed_axioms axiomAST testParams
+  refine Core.Logic.Hoare.Procedure.contractTriple_of_core_typed_axioms (opq := false)
+      (hmono := by native_decide) axiomAST testParams
     "Witness" witnessProc [] (by native_decide) (by native_decide) (by native_decide) ?_
   refine Core.Logic.Hoare.consequence _ _
     (Core.Logic.Hoare.skip axiomAST.findProcByString? testParams "" #[] _)
@@ -108,7 +120,7 @@ theorem witness_meets_contract :
     environment that satisfies the axiom, every finished run of the body, followed by
     the postcondition as an assertion, is assertion-valid. -/
 theorem witness_contract (ss : Core.Statements)
-    (hbody : witnessProc.body = .structured ss)
+    (hbody : witnessProc.body = .structured ss false)
     (ρ₀ ρ' : Imperative.Env Core.Expression) (trace : Imperative.Trace Core.Expression)
     (hentry : Core.Specification.ProcEntryEnv testParams "Witness" axiomAST witnessProc ρ₀)
     (hrun : (Core.Logic.EventLang.coreBlock axiomAST.findProcByString?).TerminatesAt
@@ -117,7 +129,17 @@ theorem witness_contract (ss : Core.Statements)
       (Core.Logic.DenoteBasedInterp (axiomAST.factoryBeforeProcedure "Witness"))
       (trace ++ Core.Specification.postconditionEvents witnessProc ρ') :=
   Core.Specification.contract_of_contractTriple witness_meets_contract witnessProc ss
-    (by native_decide) hbody ρ₀ ρ' trace hentry hrun
+    (by native_decide) hbody (by native_decide) ρ₀ ρ' trace hentry hrun
+
+/-- **Procedure correctness for `Witness`.** Every assertion of every finite execution of the
+    body is valid, and every finished run meets the contract:
+    `Core.Specification.ProcedureAssertsValidOnTraces.denote`, from
+    `Core.Specification.procedureAssertsValidOnTraces_of_contractTriple`. -/
+theorem witness_procedureAssertsValidOnTraces (ss : Core.Statements)
+    (hbody : witnessProc.body = .structured ss false) :
+    Core.Specification.ProcedureAssertsValidOnTraces.denote testParams "Witness" axiomAST :=
+  Core.Specification.procedureAssertsValidOnTraces_of_contractTriple witness_meets_contract
+    (by native_decide) hbody (by native_decide)
 
 /-! ## The position of a declaration decides -/
 
@@ -125,12 +147,13 @@ theorem witness_contract (ss : Core.Statements)
     cannot all hold. -/
 private theorem contractTriple_of_entry_absurd (p : Core.Program) (n : String)
     (hproc : p.findProcByString? n = some (procOf p n))
-    (hbody : (procOf p n).body = .structured [])
+    (hbody : (procOf p n).body = .structured [] false)
     (htyped : Core.Logic.Hoare.Procedure.contractChecksTyped (procOf p n))
-    (habsurd : ∀ ρ, ¬ Core.Specification.AxiomsBeforeProcedureDecl n p ρ) :
+    (habsurd : ∀ ρ, ¬ Core.Specification.AxiomsBeforeProcedureDecl n p ρ)
+    (hmono : (procOf p n).header.typeArgs = [] := by native_decide) :
     Core.Logic.Hoare.Procedure.contractTriple p testParams n := by
-  refine Core.Logic.Hoare.Procedure.contractTriple_of_core_typed_axioms p testParams n
-    (procOf p n) [] hproc hbody htyped ?_
+  refine Core.Logic.Hoare.Procedure.contractTriple_of_core_typed_axioms (hmono := hmono) p
+    testParams n (procOf p n) [] hproc hbody htyped ?_
   exact Core.Logic.Hoare.consequence _ _
     (Core.Logic.Hoare.skip p.findProcByString? testParams "" #[] (fun _ => False))
     (fun ρ h => habsurd ρ h.2) (fun _ h => h.elim)
@@ -142,27 +165,32 @@ private theorem contractTriple_of_entry_absurd (p : Core.Program) (n : String)
 private theorem not_contractTriple_ensures_false (p : Core.Program) (n : String)
     (hfactory : p.factoryBeforeProcedure n = Core.Factory)
     (hproc : p.findProcByString? n = some (procOf p n))
-    (hbody : (procOf p n).body = .structured [])
+    (hbody : (procOf p n).body = .structured [] false)
     (hpre : (procOf p n).spec.preconditions.toList = [])
     (hinout : ListMap.keys (procOf p n).header.getInoutParams = [])
     (hinputs : (procOf p n).header.inputs.toList = [])
+    (houtputs : (procOf p n).header.outputs.toList = [])
     (hpost : ∃ lc ∈ (procOf p n).spec.postconditions.toList,
       (Prod.snd lc).attr = Core.Procedure.CheckAttr.Default ∧
       (Prod.snd lc).expr = Lambda.LExpr.boolConst Core.valueLoc false)
-    (haxioms : ∀ ρ, Core.Specification.AxiomsBeforeProcedureDecl n p ρ) :
+    (haxioms : ∀ ρ, Core.Specification.AxiomsBeforeProcedureDecl n p ρ)
+    (hmono : (procOf p n).header.typeArgs = [] := by native_decide) :
     ¬ Core.Logic.Hoare.Procedure.contractTriple p testParams n := by
   obtain ⟨model⟩ := Core.factoryInterp_nonempty
   intro h
   rw [Core.Logic.Hoare.Procedure.contractTriple, hfactory] at h
-  obtain ⟨proc, hproc', _htyped, htb⟩ := h
+  obtain ⟨proc, hproc', hinsts⟩ := h
   obtain rfl : proc = procOf p n := Option.some.inj (hproc'.symm.trans hproc)
+  obtain ⟨_htyped, htb⟩ := hinsts [] _
+    ((Core.Procedure.instantiateTypes_of_typeArgs_nil hmono).2 ⟨rfl, rfl⟩)
   rw [hbody] at htb
   let ρ : Imperative.Env Core.Expression :=
     { store := fun _ => none, factory := boolFactory model }
-  have ⟨_hvalid, hpostF⟩ := htb ρ ρ []
+  have ⟨_hvalid, hpostF⟩ := Strata.Logic.Hoare.TripleWith.run htb ρ ρ []
     ⟨⟨preAsPredicate_of_no_pre _ _ ρ hpre, rfl,
       oldInoutAsPredicate_of_no_inout _ ρ hinout,
-      fun id ty hmem => by rw [hinputs] at hmem; cases hmem⟩, haxioms ρ⟩
+      (fun id ty hmem => by rw [hinputs] at hmem; cases hmem),
+      Core.Logic.Hoare.Procedure.outputAsPredicate_of_no_outputs ρ houtputs⟩, haxioms ρ⟩
     (blockWF_nil ρ rfl (fun _ _ hn => by cases hn))
     (.inl (run_procBlock_nil _ ρ "" #[]))
   obtain ⟨⟨label, check⟩, hmem, hattr, hexpr⟩ := hpost
@@ -270,7 +298,7 @@ theorem late_violates_contract :
   not_contractTriple_ensures_false lateAST "Late"
     (Core.Program.factoryBeforeProcedure_eq_core_of_noFunctions (by native_decide))
     (by native_decide) (by native_decide) (by native_decide) (by native_decide)
-    (by native_decide) (by native_decide)
+    (by native_decide) (by native_decide) (by native_decide)
     (Core.Specification.axiomsBeforeProcedureDecl_of_noAxioms late_axiom_after.2)
 
 /-! ### The declaration `distinct [a, a]` -/
@@ -336,7 +364,7 @@ theorem lateClash_violates_contract :
   not_contractTriple_ensures_false lateClashAST "LateClash"
     (Core.Program.factoryBeforeProcedure_eq_core_of_noFunctions (by native_decide))
     (by native_decide) (by native_decide) (by native_decide) (by native_decide)
-    (by native_decide) (by native_decide)
+    (by native_decide) (by native_decide) (by native_decide)
     (Core.Specification.axiomsBeforeProcedureDecl_of_noAxioms lateClash_distinct_after.2)
 
 /-! ## A `distinct` declaration at the entry -/
@@ -379,5 +407,71 @@ theorem apart_entry (ρ : Imperative.Env Core.Expression)
   have hpw := h.pairwise_of_mem hmem
   rw [he] at hpw
   exact (List.pairwise_cons.mp hpw).1 _ List.mem_cons_self
+
+/-! ## The callee's axioms at a call -/
+
+private def callPgm : Program :=
+#strata
+program Core;
+
+const c : int;
+axiom [c_pos]: int.gt(c, 0);
+
+procedure Callee()
+spec {
+  ensures int.gt(c, 0);
+}
+{
+};
+
+procedure Caller()
+spec {
+  ensures int.gt(c, 0);
+}
+{
+  call Callee();
+};
+
+axiom [late]: int.gt(c, 1);
+
+procedure LateCallee()
+spec {
+  ensures int.gt(c, 1);
+}
+{
+};
+#end
+
+private def callAST : Core.Program := cstToAST callPgm
+
+/-- **The callee's axioms at a call.** `Callee` is declared before `Caller` and its
+    axiom reads no variable, so an entry of `Caller` gives the axioms of `Callee` in every
+    store over the same factory: at each call in the body of `Caller`, whatever the body
+    has written. -/
+theorem callee_axioms_at_call (ρ : Imperative.Env Core.Expression) (σ : Core.CoreStore)
+    (h : Core.Specification.AxiomsBeforeProcedureDecl "Caller" callAST ρ) :
+    Core.Specification.AxiomsBeforeProcedureDecl "Callee" callAST
+      { store := σ, factory := ρ.factory } :=
+  Core.Specification.AxiomsBeforeProcedureDecl.callee (caller := "Caller") (ρ := ρ)
+    (by native_decide) (by native_decide) rfl h
+
+/-- A procedure declared after the caller, with an axiom between the two, is not covered:
+    the caller's entry does not assume that axiom. -/
+example : ¬ (callAST.declsBeforeProcedure "LateCallee").length ≤
+    (callAST.declsBeforeProcedure "Caller").length := by
+  native_decide
+
+/-- **The caller's entry assumption is invariant.** The axioms before `Caller` read no
+    variable, so they hold after any statements once they hold before, here after an
+    empty block. A proof of the body keeps them this way up to each call. -/
+theorem caller_axioms_invariant :
+    Core.Logic.Hoare.Triple callAST.findProcByString? testParams
+      (fun ρ => True ∧ Core.Specification.AxiomsBeforeProcedureDecl "Caller" callAST ρ)
+      [Imperative.Stmt.block "" [] #[]]
+      (fun ρ => True ∧ Core.Specification.AxiomsBeforeProcedureDecl "Caller" callAST ρ) :=
+  Core.Logic.Hoare.frame_factory _ _
+    (Core.Specification.AxiomsBeforeProcedureDecl "Caller" callAST)
+    (fun _ _ hfac h => h.of_closed (by native_decide) hfac)
+    (Core.Logic.Hoare.skip callAST.findProcByString? testParams "" #[] (fun _ => True))
 
 end Strata.HoareAxiomsTest

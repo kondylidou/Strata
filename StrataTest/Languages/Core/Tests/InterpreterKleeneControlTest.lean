@@ -90,13 +90,13 @@ private def π : String → Option Procedure := Strata.InterpreterTestUtils.proc
 /-- The commands of the structured body of the procedure `n`, `[]` if it has none. -/
 private def bodyCmds (n : String) : List Command :=
   match (π n).map Procedure.body with
-  | some (.structured ss) => ss.filterMap fun | .cmd c => some c | _ => none
+  | some (.structured ss _) => ss.filterMap fun | .cmd c => some c | _ => none
   | _ => []
 
 /-- The CFG body of the procedure `n`, the empty CFG if it has none. -/
 private def cfgBody (n : String) : DetCFG Expression Command :=
   match (π n).map Procedure.body with
-  | some (.cfg g) => g
+  | some (.cfg g _) => g
   | _ => { entry := "", blocks := [] }
 
 /-- The Core identifier `name`. -/
@@ -111,7 +111,7 @@ private def envX (v : Int) : IEnv Expression :=
 
 /-- The `i`-th command of the structured body of `n`, as a Kleene command. -/
 private def kcmd (n : String) (i : Nat) : KleeneStmt Expression Command :=
-  .cmd ((bodyCmds n)[i]?.getD (.call "" [] #[]))
+  .cmd ((bodyCmds n)[i]?.getD (.call "" none [] #[]))
 
 /-- The values of `x` and `t` in the terminal store of a Kleene replay run, and the oracle
     values the run consumed; `none` for a run that does not reach `.terminal`. -/
@@ -211,7 +211,8 @@ private def cfgX (n : String) (env : IEnv Expression) : Option Expression.Expr :
     `r ↦ 0`: the callee's halting store projected through the entry frame. -/
 private def calleeExit : Option (RStore Expression) :=
   match replayRun (Calls.runCallee (m := ReplayM Expression)
-      (fun fuel env c => Calls.stepCmd π 10 fuel env c) "withLocal" (.cfg (cfgBody "withLocal"))
+      (fun fuel env c => Calls.stepCmd π .contract 10 fuel env c) "withLocal" (.cfg (cfgBody
+          "withLocal") false)
       Core.Factory 100 (fun n => if n == id "r" then some (int 0) else none)) {}
       { remaining := [] } with
   | (.ok σ, _) => some σ

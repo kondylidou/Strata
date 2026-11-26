@@ -115,13 +115,13 @@ the limit, it stops when the limit is exceeded, under `EvalM` (`runCoreEval`) an
 (`replayWithM`), without exhausting the native stack. -/
 
 /-- `call S()`. -/
-private def callS : Statement := .cmd (CmdExt.call "S" [] md)
+private def callS : Statement := .cmd (CmdExt.call "S" none [] md)
 
 /-- `procedure S() { call S(); }`. -/
 private def sProc : Procedure :=
   { header := { name := id "S", typeArgs := [], inputs := [], outputs := [] }
     spec := { preconditions := [], postconditions := [] }
-    body := .structured [callS] }
+    body := .structured [callS] false }
 
 /-- The callee table resolving `S`. -/
 private def πS : String → Option Procedure := fun n => if n == "S" then some sProc else none

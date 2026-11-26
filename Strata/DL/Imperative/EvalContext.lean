@@ -283,6 +283,10 @@ class EvalContext (P : PureExpr) (State : Type) where
       a consumer resolve the failure's source location without going through the
       label. -/
   recordAssertFailure : State → String → P.Expr → MetaData P → State := fun s _ _ _ => s
+  /-- An explanation, for a diagnostic, of why the condition `e` of an `assert` or `assume` did
+      not reduce to a Boolean in concrete execution (`Cmd.run`), when the context can give one.
+      The default gives none. -/
+  explainUnreduced : State → P.Expr → Option String := fun _ _ => none
 
   /-- Whether concrete execution (`Cmd.run`) should treat `assume` statements as
       no-ops instead of enforcing them. Defaults to `false` (assumes are
@@ -293,6 +297,12 @@ class EvalContext (P : PureExpr) (State : Type) where
       otherwise derail execution even though the property under test is an
       assertion, not the assume. -/
   ignoreAssume : State → Bool := fun _ => false
+
+  /-- Whether symbolic evaluation (`Cmd.eval`) keeps an assumption with this label in the path
+      condition when its condition evaluates to `true`, where it otherwise drops it. Defaults
+      to `false`. An instance returns `true` for the labels a later check reads in an
+      obligation's path condition, so that the check sees every path the assumption is on. -/
+  keepsTrueAssume : String → Bool := fun _ => false
 
   -- /-- If two states give the same result to all `lookup` calls, they also
   -- give the same result to all `eval` calls. -/

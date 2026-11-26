@@ -12,6 +12,7 @@ public import Strata.Transform.CoreTransformProps
 import Strata.Languages.Core.ExpressionsProps
 import all Strata.Languages.Core.Factory
 import all Strata.Transform.LoopElim
+import all Strata.Languages.Core.AbstractionMarkers
 import all Strata.Transform.CoreTransform
 import all Strata.DL.Imperative.Cmd
 import all Strata.DL.Imperative.Stmt
@@ -374,27 +375,31 @@ theorem defined_of_mem_carriedVars {D df : P.Ident → Bool} {body : List (Stmt 
 
 mutual
 /-- The output of a def-use well-formed statement is def-use well formed, provided negation
-    reads no new variable and refers to no new undeclared operator. -/
+    reads no new variable and refers to no new undeclared operator, and the `true` literal of
+    the encoding's marker of a nondeterministic guard reads no variable and refers to no
+    operator. -/
 theorem StmtRel.defUseWellFormed {s s' : Stmt P (CmdExt P)} (h : StmtRel s s')
     {D df : P.Ident → Bool}
     (hnotFv : ∀ g : P.Expr, ∀ x ∈ HasFvars.getFvars (HasBoolOps.not g), x ∈ HasFvars.getFvars g)
     (hnotOps : ∀ g : P.Expr, ∀ o ∈ HasOps.getOps (HasBoolOps.not g),
       o ∈ HasOps.getOps g ∨ df o = true)
+    (httFv : HasFvars.getFvars (HasBool.tt (P := P)) = [])
+    (httOps : HasOps.getOps (HasBool.tt (P := P)) = [])
     (hdu : Stmt.defUseWellFormed D df s = true) : Stmt.defUseWellFormed D df s' = true := by
   match h with
   | .cmd _ | .exit _ _ | .typeDecl _ _ => exact hdu
   | .block hb =>
     simp only [Stmt.defUseWellFormed] at hdu ⊢
-    exact hb.defUseWellFormed hnotFv hnotOps hdu
+    exact hb.defUseWellFormed hnotFv hnotOps httFv httOps hdu
   | .ite ht he =>
     simp only [Stmt.defUseWellFormed, Bool.and_eq_true] at hdu ⊢
-    exact ⟨⟨hdu.1.1, ht.defUseWellFormed hnotFv hnotOps hdu.1.2⟩,
-      he.defUseWellFormed hnotFv hnotOps hdu.2⟩
+    exact ⟨⟨hdu.1.1, ht.defUseWellFormed hnotFv hnotOps httFv httOps hdu.1.2⟩,
+      he.defUseWellFormed hnotFv hnotOps httFv httOps hdu.2⟩
   | @StmtRel.loop _ _ _ _ g body body' md n hb _ =>
     simp only [Stmt.defUseWellFormed, Bool.and_eq_true, Option.map_none, Option.getD_none,
       List.all_nil, List.flatMap_nil, and_true] at hdu
     obtain ⟨⟨hg, hgo⟩, hbody⟩ := hdu
-    have hbody' := hb.defUseWellFormed hnotFv hnotOps hbody
+    have hbody' := hb.defUseWellFormed hnotFv hnotOps httFv httOps hbody
     have hM := havocs_defUseWellFormed (df := df) (Block.carriedVars body) md
       fun _ hx => defined_of_mem_carriedVars hbody hx
     cases g with
@@ -415,15 +420,22 @@ theorem StmtRel.defUseWellFormed {s s' : Stmt P (CmdExt P)} (h : StmtRel s s')
     | nondet =>
       simp [Stmt.loopPassive, LoopElim.havocBlock, LoopElim.enterAssume, LoopElim.exitAssume,
         Stmt.defUseWellFormed, Block.defUseWellFormed, hM, hbody', ExprOrNondet.getVars,
-        Stmt.definedVars, ExprOrNondet.getOps]
+        Stmt.definedVars, ExprOrNondet.getOps, HasPassiveCmds.assume, HasVarsImp.readVars,
+        CmdExt.readVars, Cmd.getVars, HasOpsImp.getOps, CmdExt.getOps, Cmd.getOps, httFv, httOps,
+        HasVarsImp.modifiedVars, CmdExt.modifiedVars, Cmd.modifiedVars, HasVarsImp.definedVars,
+        CmdExt.definedVars, Cmd.definedVars]
 
 /-- The output of a def-use well-formed list is def-use well formed, provided negation reads no
-    new variable and refers to no new undeclared operator. -/
+    new variable and refers to no new undeclared operator, and the `true` literal of the
+    encoding's marker of a nondeterministic guard reads no variable and refers to no
+    operator. -/
 theorem BlockRel.defUseWellFormed {ss ss' : List (Stmt P (CmdExt P))} (h : BlockRel ss ss')
     {D df : P.Ident → Bool}
     (hnotFv : ∀ g : P.Expr, ∀ x ∈ HasFvars.getFvars (HasBoolOps.not g), x ∈ HasFvars.getFvars g)
     (hnotOps : ∀ g : P.Expr, ∀ o ∈ HasOps.getOps (HasBoolOps.not g),
       o ∈ HasOps.getOps g ∨ df o = true)
+    (httFv : HasFvars.getFvars (HasBool.tt (P := P)) = [])
+    (httOps : HasOps.getOps (HasBool.tt (P := P)) = [])
     (hdu : Block.defUseWellFormed D df ss = true) : Block.defUseWellFormed D df ss' = true := by
   match h with
   | .nil => exact hdu
@@ -434,7 +446,8 @@ theorem BlockRel.defUseWellFormed {ss ss' : List (Stmt P (CmdExt P))} (h : Block
       funext n
       simp [hs.mem_definedVars true n]
     rw [hD]
-    exact ⟨hs.defUseWellFormed hnotFv hnotOps hdu.1, hr.defUseWellFormed hnotFv hnotOps hdu.2⟩
+    exact ⟨hs.defUseWellFormed hnotFv hnotOps httFv httOps hdu.1,
+      hr.defUseWellFormed hnotFv hnotOps httFv httOps hdu.2⟩
 end
 
 end DefUse
@@ -455,20 +468,23 @@ private theorem havocs_fvarTypesWellAnnotated (Γ : VarTyping P) (M : List P.Ide
 
 mutual
 /-- The output of a statement has its free-variable annotations checked wherever the statement
-    does, provided negation adds no annotated occurrence. -/
+    does, provided negation adds no annotated occurrence and the `true` literal of the
+    encoding's marker of a nondeterministic guard has no annotated occurrence. -/
 theorem StmtRel.fvarTypesWellAnnotated {s s' : Stmt P (CmdExt P)} (h : StmtRel s s')
     (hnotTy : ∀ g : P.Expr, ∀ p ∈ HasFvars.getTypedFvars (HasBoolOps.not g),
       p ∈ HasFvars.getTypedFvars g)
+    (httTy : HasFvars.getTypedFvars (HasBool.tt (P := P)) = [])
     {Γ : VarTyping P} (hw : Stmt.fvarTypesWellAnnotated Γ s) :
     Stmt.fvarTypesWellAnnotated Γ s' := by
   match h with
   | .cmd _ | .exit _ _ | .typeDecl _ _ => exact hw
-  | .block hb => exact hb.fvarTypesWellAnnotated hnotTy hw
+  | .block hb => exact hb.fvarTypesWellAnnotated hnotTy httTy hw
   | .ite ht he =>
-    exact ⟨hw.1, ht.fvarTypesWellAnnotated hnotTy hw.2.1, he.fvarTypesWellAnnotated hnotTy hw.2.2⟩
+    exact ⟨hw.1, ht.fvarTypesWellAnnotated hnotTy httTy hw.2.1,
+      he.fvarTypesWellAnnotated hnotTy httTy hw.2.2⟩
   | @StmtRel.loop _ _ _ _ g body body' md n hb _ =>
     obtain ⟨hg, -, -, hbody⟩ := hw
-    have hbody' := hb.fvarTypesWellAnnotated hnotTy hbody
+    have hbody' := hb.fvarTypesWellAnnotated hnotTy httTy hbody
     have hnil : ∀ Γ : VarTyping P, Γ.extend [] = Γ := fun _ => rfl
     have hM := havocs_fvarTypesWellAnnotated Γ (Block.carriedVars body) md
     cases g with
@@ -487,25 +503,32 @@ theorem StmtRel.fvarTypesWellAnnotated {s s' : Stmt P (CmdExt P)} (h : StmtRel s
           CmdExt.typedReadVars, Cmd.getTypedVars] at hx
         exact hg x ty (by simpa [ExprOrNondet.getTypedVars] using hnotTy g _ hx)
     | nondet =>
-      refine ⟨hg, ⟨⟨hM, ?_⟩, ?_⟩, trivial⟩
+      have htt : ∀ l x ty, (x, ty) ∈ HasTypedVarsImp.typedReadVars (P := P)
+          (HasPassiveCmds.assume (CmdT := CmdExt P) l HasBool.tt md) → False := by
+        simp [HasPassiveCmds.assume, HasTypedVarsImp.typedReadVars, CmdExt.typedReadVars,
+          Cmd.getTypedVars, httTy]
+      refine ⟨hg, ⟨⟨hM, ⟨fun x ty hx => (htt _ x ty hx).elim, ?_⟩⟩, ?_⟩, trivial⟩
       · simpa [hnil, Stmt.typedDefinedVars, LoopElim.havocBlock,
-          LoopElim.enterAssume] using hbody'
+          HasPassiveCmds.assume, HasTypedVarsImp.typedDefinedVars, CmdExt.typedDefinedVars,
+          Cmd.typedDefinedVars] using hbody'
       · simp only [Stmt.typedDefinedVars, hnil]
-        exact ⟨hM, trivial⟩
+        exact ⟨hM, fun x ty hx => (htt _ x ty hx).elim, trivial⟩
 
 /-- The output of a list has its free-variable annotations checked wherever the list does,
-    provided negation adds no annotated occurrence. -/
+    provided negation adds no annotated occurrence and the `true` literal of the encoding's
+    marker of a nondeterministic guard has no annotated occurrence. -/
 theorem BlockRel.fvarTypesWellAnnotated {ss ss' : List (Stmt P (CmdExt P))} (h : BlockRel ss ss')
     (hnotTy : ∀ g : P.Expr, ∀ p ∈ HasFvars.getTypedFvars (HasBoolOps.not g),
       p ∈ HasFvars.getTypedFvars g)
+    (httTy : HasFvars.getTypedFvars (HasBool.tt (P := P)) = [])
     {Γ : VarTyping P} (hw : Block.fvarTypesWellAnnotated Γ ss) :
     Block.fvarTypesWellAnnotated Γ ss' := by
   match h with
   | .nil => exact hw
   | .cons hs hr =>
-    refine ⟨hs.fvarTypesWellAnnotated hnotTy hw.1, ?_⟩
+    refine ⟨hs.fvarTypesWellAnnotated hnotTy httTy hw.1, ?_⟩
     rw [hs.typedDefinedVars]
-    exact hr.fvarTypesWellAnnotated hnotTy hw.2
+    exact hr.fvarTypesWellAnnotated hnotTy httTy hw.2
 end
 
 /-! ## Partial elimination
@@ -822,33 +845,40 @@ private theorem runStmtsRec_removeLoop (ss : List Statement) :
   runStmtsRec_removeLoop_aux _ ss (Nat.lt_succ_self _)
 
 /-- `d'` is `d` with its procedure body, when it is a structured body `ss`, replaced by a list
-    `ss'` with `R ss ss'`; every other declaration, a procedure with a CFG body included, is
-    kept. -/
+    `ss'` with `R ss ss'`; every other declaration, a procedure with a CFG body and an abstract
+    procedure included, is kept. -/
 @[expose] def DeclBodyRel (R : Statements → Statements → Prop) : Decl → Decl → Prop
   | .proc proc md, d' => match proc.body with
-    | .structured ss => ∃ ss', R ss ss' ∧ d' = .proc { proc with body := .structured ss' } md
-    | .cfg _ => d' = .proc proc md
+    | .structured ss o => ∃ ss', R ss ss' ∧ d' = .proc { proc with body := .structured ss' o } md
+    | .cfg _ _ | .abstract => d' = .proc proc md
   | d, d' => d' = d
 
 /-- A procedure with a structured body `ss` is related to the procedures with a body `ss'` such
     that `R ss ss'`. -/
 private theorem declBodyRel_structured {R : Statements → Statements → Prop} {proc : Procedure}
-    {md : MetaData Expression} {ss : Statements} (hb : proc.body = .structured ss) {d' : Decl} :
+    {md : MetaData Expression} {ss : Statements} (hb : proc.body = .structured ss opq) {d' : Decl} :
     DeclBodyRel R (.proc proc md) d' ↔
-      ∃ ss', R ss ss' ∧ d' = .proc { proc with body := .structured ss' } md := by
+      ∃ ss', R ss ss' ∧ d' = .proc { proc with body := .structured ss' opq } md := by
   simp only [DeclBodyRel, hb]
 
 /-- A procedure with a CFG body is related only to itself. -/
 private theorem declBodyRel_cfg {R : Statements → Statements → Prop} {proc : Procedure}
-    {md : MetaData Expression} {g : Imperative.DetCFG Expression Command} (hb : proc.body = .cfg g)
+    {md : MetaData Expression} {g : Imperative.DetCFG Expression Command} (hb : proc.body = .cfg g
+        opq)
     {d' : Decl} : DeclBodyRel R (.proc proc md) d' ↔ d' = .proc proc md := by
+  simp only [DeclBodyRel, hb]
+
+/-- An abstract procedure is related only to itself. -/
+private theorem declBodyRel_abstract {R : Statements → Statements → Prop} {proc : Procedure}
+    {md : MetaData Expression} (hb : proc.body = .abstract) {d' : Decl} :
+    DeclBodyRel R (.proc proc md) d' ↔ d' = .proc proc md := by
   simp only [DeclBodyRel, hb]
 
 /-- The number of loops in the structured procedure body of a declaration. -/
 private def declNumLoops : Decl → Nat
   | .proc proc _ => match proc.body with
-    | .structured ss => Block.numLoops ss
-    | .cfg _ => 0
+    | .structured ss _ => Block.numLoops ss
+    | .cfg _ _ | .abstract => 0
   | _ => 0
 
 /-- The number of loops of a program is the sum of those of its declarations. -/
@@ -876,6 +906,7 @@ private theorem declBodyRel_refl :
         cases hb : proc.body
         · exact (declBodyRel_structured hb).2 ⟨_, .refl _, by rw [← hb]⟩
         · exact (declBodyRel_cfg hb).2 rfl
+        · exact (declBodyRel_abstract hb).2 rfl
       all_goals rfl) (declBodyRel_refl ds)
 
 /-- After one pass of `runProgram removeLoop`, a declaration whose procedure body is that of
@@ -888,19 +919,29 @@ private theorem declBodyRel_declStep {d₀ d : Decl} {r : Bool × Decl}
     cases hb : proc₀.body
     · rw [declBodyRel_structured hb] at h₁ ⊢
       obtain ⟨ss₁, hrel, rfl⟩ := h₁
-      rcases h₂ with ⟨ss, ss', hss, hq, hr⟩ | ⟨g, hg, -⟩
-      · obtain rfl : ss₁ = ss := Body.structured.inj hss
+      rcases h₂ with ⟨ss, ss', o, hss, hq, hr⟩ | ⟨g, o, hg, -⟩ | ⟨hg, -⟩
+      · obtain ⟨rfl, rfl⟩ := Body.structured.inj hss
         obtain ⟨c, d'⟩ := r
         cases c
         · exact ⟨ss₁, hrel, hr⟩
         · exact ⟨ss', hrel.trans hq.1, hr⟩
       · cases hg
+      · cases hg
     · -- A CFG body is kept.
       rw [declBodyRel_cfg hb] at h₁ ⊢
       subst h₁
-      rcases h₂ with ⟨ss, -, hss, -⟩ | ⟨-, -, rfl⟩
+      rcases h₂ with ⟨ss, _, _, hss, -⟩ | ⟨_, _, _, rfl⟩ | ⟨-, rfl⟩
       · rw [hb] at hss
         cases hss
+      · rfl
+      · rfl
+    · -- An abstract procedure is kept.
+      rw [declBodyRel_abstract hb] at h₁ ⊢
+      subst h₁
+      rcases h₂ with ⟨ss, _, _, hss, -⟩ | ⟨_, _, _, rfl⟩ | ⟨-, rfl⟩
+      · rw [hb] at hss
+        cases hss
+      · rfl
       · rfl
   all_goals
     obtain rfl := h₁
@@ -915,13 +956,13 @@ private theorem declStep_numLoops {d : Decl} {r : Bool × Decl}
       (r.1 = Bool.false → declNumLoops r.2 = 0) := by
   cases d
   case proc proc md =>
-    rcases h with ⟨ss, ss', hb, hq, hr⟩ | ⟨g, hb, rfl⟩
+    rcases h with ⟨ss, ss', o, hb, hq, hr⟩ | ⟨g, o, hb, rfl⟩ | ⟨hb, rfl⟩
     · obtain ⟨c, d'⟩ := r
       cases c <;> simp only [Bool.false_eq_true, ↓reduceIte] at hr <;> subst hr <;>
         simp only [declNumLoops, hb]
       · exact ⟨Nat.le_refl _, nofun, fun _ => hq.2.2.2 rfl⟩
       · exact ⟨Nat.le_of_lt (hq.2.2.1 rfl), fun _ => hq.2.2.1 rfl, nofun⟩
-    · simp [declNumLoops, hb]
+    all_goals simp [declNumLoops, hb]
   all_goals
     obtain rfl := h
     simp [declNumLoops]
@@ -996,6 +1037,8 @@ theorem declBodyRel_blockRel {p p' : Program}
         exact ⟨ss', hrel.blockRel (by simp only [declNumLoops] at hn; omega), rfl⟩
       · rw [declBodyRel_cfg hb] at hd ⊢
         exact hd
+      · rw [declBodyRel_abstract hb] at hd ⊢
+        exact hd
     all_goals exact hd
 
 /-- **The Core pass eliminates loops as `Block.loopElim` does, up to loop numbers.**  When
@@ -1008,9 +1051,9 @@ theorem loopElim_blockRel {p p' : Program} {c : Bool} {σ σ' : Transform.CoreTr
     (h : loopElim p σ = (.ok (c, p'), σ')) :
     List.Rel₂ (fun d d' => match d with
       | .proc proc md => match proc.body with
-        | .structured ss =>
-          ∃ ss', BlockRel ss ss' ∧ d' = .proc { proc with body := .structured ss' } md
-        | .cfg _ => d' = d
+        | .structured ss o =>
+          ∃ ss', BlockRel ss ss' ∧ d' = .proc { proc with body := .structured ss' o } md
+        | .cfg _ _ | .abstract => d' = d
       | _ => d' = d) p.decls p'.decls :=
   have ⟨hrel, hn⟩ := Transform.runProgramUntil_post (fun _ hq => runProgram_removeLoop hq)
     (declBodyRel_refl p.decls) (Nat.lt_succ_self (numLoops p)) σ _ σ' h
@@ -1024,8 +1067,8 @@ theorem loopElim_blockRel {p p' : Program} {c : Bool} {σ σ' : Transform.CoreTr
 theorem loopElim_body_blockRel {p p' : Program} {c : Bool}
     {σ σ' : Transform.CoreTransformState} (h : loopElim p σ = (.ok (c, p'), σ'))
     {i : Nat} {proc : Procedure} {md : MetaData Expression} {ss : Statements}
-    (hproc : p.decls[i]? = some (.proc proc md)) (hbody : proc.body = .structured ss) :
-    ∃ ss', p'.decls[i]? = some (.proc { proc with body := .structured ss' } md) ∧
+    (hproc : p.decls[i]? = some (.proc proc md)) (hbody : proc.body = .structured ss opq) :
+    ∃ ss', p'.decls[i]? = some (.proc { proc with body := .structured ss' opq } md) ∧
       BlockRel ss ss' := by
   obtain ⟨d', hd', hrel⟩ := (loopElim_blockRel h).getElem?_some hproc
   simp only [hbody] at hrel
@@ -1078,7 +1121,7 @@ theorem blockInitEnvWF_of_blockRel {params : InitEnvWFParams} {L : List String}
     (Core.not_getOps g o ho).imp_right fun h => by
       subst h
       exact hwf.factoryDeclared _ boolNot_isNameInFactory
-  have hdu' := hrel.defUseWellFormed Core.not_getFvars hnotOps hwf.defUseOk
+  have hdu' := hrel.defUseWellFormed Core.not_getFvars hnotOps rfl rfl hwf.defUseOk
   exact { hwf with
     readWritesDefined := fun _ hn hnd =>
       Imperative.Block.defined_of_mem_touchedVars (fun _ _ h => h) hdu' hn hnd
@@ -1091,7 +1134,7 @@ theorem blockInitEnvWF_of_blockRel {params : InitEnvWFParams} {L : List String}
     initTypesInhabited := fun ty hty => hwf.initTypesInhabited ty (hrel.initTypes ty hty)
     fvarTypesOk := by
       obtain ⟨Γ, hσ, hw⟩ := hwf.fvarTypesOk
-      exact ⟨Γ, hσ, hrel.fvarTypesWellAnnotated Core.not_getTypedFvars hw⟩
+      exact ⟨Γ, hσ, hrel.fvarTypesWellAnnotated Core.not_getTypedFvars rfl hw⟩
     measuresTyped := fun m hm => hwf.measuresTyped m (hrel.measures ▸ hm) }
 
 end -- public section

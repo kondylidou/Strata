@@ -7,6 +7,7 @@ module
 public import Strata.Pipeline.Messages
 
 public import Strata.Languages.Core.PipelinePhase
+public import Strata.Languages.Core.MarkerLabels
 import Strata.Languages.Core.StatementSemantics
 import Strata.Transform.CoreTransform
 import Strata.Transform.LoopElim
@@ -21,9 +22,6 @@ def insertLoopInvAssertReservedPrefix : String := "$__loop"
 /-- Label prefix for invariant/measure asserts inserted by
     `InsertLoopInvariantAsserts`. -/
 def insertLoopInvAssertPrefix : String := "insertLoopInvAssert_"
-/-- Label prefix for invariant/measure assumptions inserted by
-    `InsertLoopInvariantAsserts`. -/
-def insertLoopInvAssumePrefix : String := "insertLoopInvAssume_"
 
 /-! ## Inserting loop invariant / measure assertions
 
@@ -301,11 +299,14 @@ def insertLoopInvariantAsserts (p : Program) : Transform.CoreTransformM (Bool ×
 /-- Pipeline phase that materializes loop invariant/measure verification
     conditions (`insertLoopInvariantAsserts`). -/
 def insertLoopInvariantAssertsPipelinePhase : PipelinePhase where
-  transform p := insertLoopInvariantAsserts p
+  transform p := do
+    rejectMarkerLabels "the insertion of loop invariant checks" insertLoopInvAssumePrefix p
+    insertLoopInvariantAsserts p
   phase.name := "insertLoopInvariantAsserts"
+  phase.validationPrefixes := [insertLoopInvAssumePrefix]
   phase.getValidation obligation :=
     if obligationHasLabelPrefix obligation insertLoopInvAssumePrefix then
-      .modelToValidate (fun _ => /- TODO -/ false)
+      .modelToValidate (fun _ _ => /- TODO -/ none)
     else .modelPreserving
   -- The measure snapshot is an `init`, which declares rather than reassigns, so
   -- `staticSingleAssignment` survives; the invariants, measure and guard are
@@ -315,7 +316,7 @@ def insertLoopInvariantAssertsPipelinePhase : PipelinePhase where
   preserves := factSet![.noCFGBodies, .noCalls, .noLoops, .staticSingleAssignment,
                       .noBetaRedexes, .noPrecondsFromFuncs, .noNondetGuards, .noProcedureContracts,
                          .noPolymorphicProcedures,
-                         .noPolymorphicFunctions, .typeAnnotated, .exitsCovered]
+                         .noPolymorphicFunctions, .typeAnnotated, .exitsCovered, .noCFGCycles]
 
 end -- public section
 

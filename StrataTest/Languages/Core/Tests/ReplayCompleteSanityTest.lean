@@ -8,6 +8,7 @@ module
 import Strata.Languages.Core.InterpreterCallComplete
 import Strata.Languages.Core.InterpreterComplete
 import Strata.Languages.Core.InstWellFormedSemanticsEval
+import Strata.Languages.Core.ProcedureProps
 import all Strata.Languages.Core.Interpreter
 import all Strata.Languages.Core.InterpreterReplay
 import all Strata.DL.Imperative.InterpreterCall
@@ -22,7 +23,7 @@ import all Strata.DL.Imperative.InterpreterSound
 import all Strata.Languages.Core.InterpreterSound
 import Strata.Languages.Core.InterpreterReplayTactics
 import Strata.Languages.Core.InterpreterProps
-import Strata.Languages.Core.Logic.FactoryInterp
+import Strata.Languages.Core.FactoryInterp
 import Strata.Languages.Core.FactoryWF
 import Strata.Languages.Core.InterpreterDomainProps
 
@@ -70,7 +71,7 @@ private theorem ffE_eval (n : Nat) (F : Lambda.Factory CoreLParams) (σr : RStor
 def wProc : Procedure :=
   { header := { name := ⟨"w", ()⟩, typeArgs := [], inputs := [], outputs := [] },
     spec := { preconditions := [], postconditions := [] },
-    body := .structured [.cmd (.cmd (.assert "fail" ffE md))] }
+    body := .structured [.cmd (.cmd (.assert "fail" ffE md))] false }
 
 /-- The procedure table: `"w"` resolves to `wProc`. -/
 def wPi : String → Option Procedure := fun n => if n = "w" then some wProc else none
@@ -81,7 +82,7 @@ def wEnv : Imperative.IEnv Expression :=
 
 /-- The counterexample: the call, with an empty oracle. -/
 def wCex : CexA Expression Command :=
-  { cfg := .stmts [.cmd (.call "w" [] md)] wEnv, oracle := [] }
+  { cfg := .stmts [.cmd (.call "w" none [] md)] wEnv, oracle := [] }
 
 /-- The target: the callee's assert. -/
 def wTarget : AssertId Expression := { label := "fail", md := md }
@@ -96,7 +97,7 @@ private theorem wRun (F : Expression.Factory) :
   refine ⟨_, _, ⟨1, fun rest =>
     .step _ _ _ _ _ (.step_det .step_stmts_cons)
     (.step _ _ _ _ _ (.step_seq_inner (.step_cmd (.inr (.inl
-      ⟨"w", wProc, [], md, _, _, _, _, rfl, rfl, rfl,
+      ⟨"w", none, wProc, [], md, _, _, _, _, rfl, rfl, rfl,
         ⟨[], [], .eval_none, .read_none, ⟨_, _, .init_none, .init_none, rfl⟩⟩,
         .step _ _ _ _ _ (.step_det .step_block)
           (.step _ _ _ _ _ (.step_det (.step_block_body .step_stmts_cons))
@@ -136,7 +137,7 @@ def hProc : Procedure :=
   { header := { name := ⟨"h", ()⟩, typeArgs := [], inputs := [], outputs := [] },
     spec := { preconditions := [], postconditions := [] },
     body := .structured [.cmd (.cmd (.init bId HasBool.boolTy .nondet md)),
-      .cmd (.cmd (.assert "neg" bE md))] }
+      .cmd (.cmd (.assert "neg" bE md))] false }
 
 /-- The procedure table: `"h"` resolves to `hProc`. -/
 def hPi : String → Option Procedure := fun n => if n = "h" then some hProc else none
@@ -148,7 +149,7 @@ def hEnv : Imperative.IEnv Expression :=
 /-- The counterexample: `if * then call h()`, with the oracle `[tt, ff]`: `tt` takes the
     then-branch, `ff` is the value the callee's `init b` writes. -/
 def hCex : CexA Expression Command :=
-  { cfg := .stmts [.ite .nondet [.cmd (.call "h" [] md)] [] md] hEnv,
+  { cfg := .stmts [.ite .nondet [.cmd (.call "h" none [] md)] [] md] hEnv,
     oracle := [HasBool.tt, HasBool.ff] }
 
 /-- The target: the callee's assert. -/
@@ -226,7 +227,7 @@ private theorem hRun (F : Expression.Factory) (hF : F.factory = Core.Factory) :
     (.step _ _ _ _ _ (.step_seq_inner .step_ite_then)
     (.step _ _ _ _ _ (.step_det (.step_seq_inner (.step_block_body .step_stmts_cons)))
     (.step _ _ _ _ _ (.step_seq_inner (.step_block_body (.step_seq_inner (.step_cmd (.inr (.inl
-      ⟨"h", hProc, [], md, _, _, _, _, rfl, rfl, rfl,
+      ⟨"h", none, hProc, [], md, _, _, _, _, rfl, rfl, rfl,
         ⟨[], [], .eval_none, .read_none, ⟨_, _, .init_none, .init_none, rfl⟩⟩,
         .step _ _ _ _ _ (.step_det .step_block)
             (.step _ _ _ _ _ (.step_det (.step_block_body .step_stmts_cons))
@@ -289,23 +290,28 @@ def wCallee : Procedure :=
         inputs := [(vid "a", Lambda.LMonoTy.bool)],
         outputs := [(vid "b", Lambda.LMonoTy.bool)] },
     spec := { preconditions := [], postconditions := [] },
-    body := .structured [.cmd (.cmd (.set (vid "b") (.det (rd "a")) mdE))] }
+    body := .structured [.cmd (.cmd (.set (vid "b") (.det (rd "a")) mdE))] false }
 
 /-- The procedure table: `"w"` resolves to `wCallee`, every other name to nothing. -/
 def wPi : String → Option Procedure := fun n => if n = "w" then some wCallee else none
 
 /-- The call site: one strict input actual and one output actual. -/
-def wCall : Command := .call "w" [.inArg (rd "x"), .outArg (vid "y")] mdE
+def wCall : Command := .call "w" none [.inArg (rd "x"), .outArg (vid "y")] mdE
 
 attribute [local simp] Block.allCmds.eq_1 Block.allCmds.eq_2 Stmt.allCmds.eq_1
   Calls.CmdCallOk Calls.StrictActual Calls.getInputExprs CallArg.getInputExprs CallArg.getLhs ListMap.keys
   Procedure.Header.getOutputOnlyParams HasFvar.getFvar HasFvars.getFvars
 
+/-- The witness table has no polymorphic procedure. -/
+private theorem wPi_mono : ∀ n p, wPi n = some p → p.header.typeArgs = [] := by
+  simp [wPi, wCallee]
+
 /-- Every procedure of the witness table is well-formed for call-aware replay: its frame-binding
     formals are pairwise distinct, and its structured body is exit-covered and has well-formed
     call sites. -/
-private theorem procsOk_wPi : ProcsOk wPi := by
-  simp [ProcsOk, ProcOk, wPi, wCallee, vid, Block.exitsCoveredByBlocks, Stmt.exitsCoveredByBlocks]
+private theorem procsOk_wPi : ProcsOk wPi :=
+  procsOk_of_procOk
+    (by simp [ProcOk, wPi, wCallee, vid, Block.exitsCoveredByBlocks, Stmt.exitsCoveredByBlocks])
 
 /-- The witness caller environment: the empty store over Core's concrete factory. -/
 def wEnv : Imperative.IEnv Expression :=
@@ -335,9 +341,9 @@ def wFuel : Nat := 100
 /-- No target assertion id occurs in a procedure of the witness table: the callee has no spec
     clauses and its body has no `assert` or `cover`. -/
 private theorem targetNotInProcs_wPi (target : AssertId Expression) :
-    TargetNotInProcs wPi target := by
-  simp [Calls.TargetNotInProcs, wPi, wCallee, Calls.ChecksAvoidTarget, Calls.cmdAvoidsTarget,
-    Calls.checksAtCall]
+    TargetNotInProcs wPi target :=
+  Procedure.forall_typeInstantiatedCallee_of_typeArgs_nil wPi_mono
+    (by simp [wPi, wCallee, Calls.ChecksAvoidTarget, Calls.cmdAvoidsTarget, Calls.checksAtCall])
 
 /-- Replay soundness holds at the witness, at every modeled factory over `Core.Factory`: for
     every target, if replaying `wCex` returns `genuine`, then the reference semantics has a run

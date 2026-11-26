@@ -8,10 +8,11 @@ module
 public import Strata.Languages.Core.Factory
 public import Strata.DL.Lambda.Denote.LExprSemanticsConsistent
 public import Strata.DL.Lambda.LExprEvalAnnotateProps
+public import Strata.DL.Lambda.OperationalSemanticsProps
 import all Strata.DL.Lambda.Denote.LExprSemanticsConsistent
 import all Strata.DL.Lambda.Denote.Assumptions
 import all Strata.Languages.Core.Factory
-import all Strata.Languages.Core.Logic.FactoryInterp
+import all Strata.Languages.Core.FactoryInterp
 import all Strata.DL.Lambda.TypeFactory
 import all Strata.DL.Lambda.LExprWF
 import all Strata.DL.Lambda.Factory
@@ -26,11 +27,13 @@ signature, annotates its parameters with their declared types, and is `OpsConsis
 substitutions inlining uses) satisfies the conditions under which `LExpr.eval` preserves
 denotation (`Lambda.Factory.EvalSoundWF`), and its short-circuit evaluators commute with
 re-annotating free variables (`Lambda.Factory.ShortCircuitAnnotates`). `Core.Factory` is such a
-factory.
+factory. When the user functions' bodies call only functions of the factory, the factory also
+brings in only its own operators (`Lambda.Factory.OpsClosed`), since `Core.Factory`'s concrete
+evaluators return a constant or one of their arguments.
 
 Key definitions: `Core.UserFuncWF`. Key theorems: `Core.programFactory_evalSoundWF`,
-`Core.programFactory_shortCircuitAnnotates`, `Core.factory_evalSoundWF`,
-`Core.factory_shortCircuitAnnotates`.
+`Core.programFactory_shortCircuitAnnotates`, `Core.programFactory_opsClosed`,
+`Core.factory_evalSoundWF`, `Core.factory_shortCircuitAnnotates`, `Core.factory_opsClosed`.
 -/
 
 namespace Core
@@ -60,18 +63,21 @@ open Lambda in
     of the output type builds constants of that type; it is not a short-circuit function. -/
 private theorem unaryOp_shape {inTy outTy : LMonoTy} {InV OutV : Type} [ToString OutV]
     [LambdaLeanType inTy InV] [LambdaLeanType outTy OutV]
-    {n : CoreLParams.Identifier} {f : InV → OutV} {pre hI hO hp}
+    {n : CoreLParams.Identifier} {f : InV → OutV} {guard pre hI hO hp}
     (hmk : ∀ md (v : OutV), ∃ m c, LambdaLeanType.mkConst (ty := outTy) CoreLParams md v =
       .const m c ∧ c.wt = true ∧ c.ty = outTy := by intro md v; exact ⟨_, _, rfl, rfl, rfl⟩) :
-    EvalShape (unaryOp n f pre hI hO hp).func ∧ SCShape (unaryOp n f pre hI hO hp).func := by
+    EvalShape (unaryOp n f guard pre hI hO hp).func ∧
+      SCShape (unaryOp n f guard pre hI hO hp).func := by
   refine ⟨fun ceval hce md opTy args r h => .inl ?_, fun h => nomatch h⟩
   cases hce
   simp only at h
   split at h
   · split at h
-    · cases h
-      obtain ⟨m, c, h1, h2, h3⟩ := hmk md (f _)
-      exact ⟨m, c, h1, h2, .inl h3⟩
+    · split at h
+      · cases h
+        obtain ⟨m, c, h1, h2, h3⟩ := hmk md (f _)
+        exact ⟨m, c, h1, h2, .inl h3⟩
+      · cases h
     · cases h
   · cases h
 
@@ -85,6 +91,30 @@ private theorem binaryOp_shape {inTy outTy : LMonoTy} {InV OutV : Type} [ToStrin
       .const m c ∧ c.wt = true ∧ c.ty = outTy := by intro md v; exact ⟨_, _, rfl, rfl, rfl⟩) :
     EvalShape (binaryOp n g guard pre hI hO hp).func ∧
       SCShape (binaryOp n g guard pre hI hO hp).func := by
+  refine ⟨fun ceval hce md opTy args r h => .inl ?_, fun h => nomatch h⟩
+  cases hce
+  simp only at h
+  split at h
+  · split at h
+    · split at h
+      · cases h
+        obtain ⟨m, c, h1, h2, h3⟩ := hmk md (g _ _)
+        exact ⟨m, c, h1, h2, .inl h3⟩
+      · cases h
+    · cases h
+  · cases h
+
+open Lambda in
+/-- A `heteroBinaryOp` evaluator returns a constant of its output type, provided the literal builder
+    of the output type builds constants of that type; it is not a short-circuit function. -/
+private theorem heteroBinaryOp_shape {inTy1 inTy2 outTy : LMonoTy} {InV1 InV2 OutV : Type}
+    [ToString OutV] [LambdaLeanType inTy1 InV1] [LambdaLeanType inTy2 InV2]
+    [LambdaLeanType outTy OutV]
+    {n : CoreLParams.Identifier} {g : InV1 → InV2 → OutV} {guard pre hI1 hI2 hO hp}
+    (hmk : ∀ md (v : OutV), ∃ m c, LambdaLeanType.mkConst (ty := outTy) CoreLParams md v =
+      .const m c ∧ c.wt = true ∧ c.ty = outTy := by intro md v; exact ⟨_, _, rfl, rfl, rfl⟩) :
+    EvalShape (heteroBinaryOp n g guard pre hI1 hI2 hO hp).func ∧
+      SCShape (heteroBinaryOp n g guard pre hI1 hI2 hO hp).func := by
   refine ⟨fun ceval hce md opTy args r h => .inl ?_, fun h => nomatch h⟩
   cases hce
   simp only at h
@@ -158,6 +188,7 @@ private theorem all_shape :
     first
     | exact unaryOp_shape
     | exact binaryOp_shape
+    | exact heteroBinaryOp_shape
     | exact shortCircuitOp_shape
     | exact polyLitOp_shape
     | exact unaryOp_shape (inTy := .bitvec _) (outTy := .int) (pre := []) (hI := rfl)
@@ -359,6 +390,29 @@ theorem factory_evalSoundWF : Lambda.Factory.EvalSoundWF Core.Factory :=
     commute with re-annotating the free variables of their unevaluated arguments. -/
 theorem factory_shortCircuitAnnotates : Lambda.Factory.ShortCircuitAnnotates Core.Factory :=
   programFactory_shortCircuitAnnotates _ fun _ h => .inl h
+
+/-- A program factory brings in only its own operators (`Lambda.Factory.OpsClosed`) when each of
+    its functions is a function of `Core.Factory` or a user function meeting `UserFuncWF` whose
+    body mentions only functions of the factory: `Core.Factory`'s functions have no body, and
+    their concrete evaluators return a constant or one of their arguments. -/
+theorem programFactory_opsClosed (F : Lambda.Factory CoreLParams)
+    (hfns : ∀ fn ∈ F.toArray, fn ∈ Core.Factory.toArray ∨ UserFuncWF F fn)
+    (hbody : ∀ fn ∈ F.toArray, ∀ body, fn.body = some body →
+      body.OpsIn (fun o => o.name ∈ F)) :
+    Lambda.Factory.OpsClosed F := by
+  refine ⟨hbody, fun fn hfn ceval hce md opTy args r hr => ?_⟩
+  rcases hfns fn hfn with h | h
+  · rcases (shape_of_mem h).1 ceval hce md opTy args r hr with
+      ⟨m, c, rfl, -⟩ | ⟨x, rfl, -⟩
+    · exact Lambda.LExpr.OpsIn.const
+    · exact fun o ho => .inr ⟨r, by simp, ho⟩
+  · exact nomatch h.1.symm.trans hce
+
+/-- `Core.Factory` brings in only its own operators: its functions have no body, and their
+    concrete evaluators return a constant or one of their arguments. -/
+theorem factory_opsClosed : Lambda.Factory.OpsClosed Core.Factory :=
+  programFactory_opsClosed _ (fun _ h => .inl h)
+    fun fn h _ hb => nomatch (FactoryInterpModel.all_bodies_none fn h).symm.trans hb
 
 end -- public section
 

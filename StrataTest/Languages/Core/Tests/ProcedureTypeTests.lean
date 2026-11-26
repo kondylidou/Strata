@@ -10,6 +10,7 @@ meta import Strata.Languages.Core
 import Strata.Languages.Core.Factory
 import StrataDDM.Integration.Lean.HashCommands
 meta import StrataTest.Languages.Core.Tests.TestUtil
+meta import StrataTest.Transform.CallFixtures
 
 meta section
 
@@ -20,7 +21,8 @@ namespace Core
 section Tests
 open Std (ToFormat Format format)
 open Procedure Statement Lambda Lambda.LTy.Syntax Lambda.LExpr.SyntaxMono Core.Syntax
-open Core.TestUtil (anyFunction coreVerdict listDecl mkProc translate verdictOf)
+open Core.TestUtil (anyFunction callTyArgs cfgProc coreVerdict declNondet identityDecl listDecl
+  mkProc translate tyArgsOfResult verdictOf)
 
 /--
 info: ok: (procedure P (x : int, out y : int)
@@ -47,7 +49,7 @@ info: ok: (procedure P (x : int, out y : int)
                                          postconditions := [("ret_y_lt_0", ⟨eb[((~Int.Lt y) #0)], .Default, #[]⟩)] },
                                body := .structured [
                                  Statement.set "y" eb[((~Int.Sub #0) x)] .empty
-                               ]
+                               ] false
                              }
                             .empty
          return format ans
@@ -76,7 +78,7 @@ info: ok: program Core;
 
 procedure ConstAll<a> (x : a, out r : a)
 spec {
-  ensures [ConstAll_ensures_0]: forall y : (a) :: y == x;
+  ensures [ConstAll_ensures_0]: forall y : a :: y == x;
 } {
   r := x;
 };
@@ -89,7 +91,7 @@ spec {
 private def callFooAtBool : Decl :=
   mkProc "Test" [] [] []
     [Statement.init "y" (.forAll [] .bool) (.det eb[#true]) .empty,
-     Statement.call "Foo" [.outArg "y"] .empty]
+     Statement.call "Foo" none [.outArg "y"] .empty]
 
 private def xAndTrue : Expression.Expr := eb[((~Bool.And x) #true)]
 
@@ -111,7 +113,7 @@ info: error: Procedure 'Foo': Rigid type variable 'a' was refined to 'int'
 private def rigidCallOutputRefinementPgm : Program := { decls :=
   [mkProc "Bar" [] [] [("r", .int)] [Statement.set "r" eb[#0] .empty],
    mkProc "Foo" ["a"] [] [("x", .ftvar "a")]
-     [Statement.call "Bar" [.outArg "x"] .empty],
+     [Statement.call "Bar" none [.outArg "x"] .empty],
    callFooAtBool] }
 
 /--
@@ -160,7 +162,7 @@ private def rigidCallUnsolvedListRefinementPgm : Program := { decls :=
    mkProc "Mk" ["c"] [] [("r", .tcons "List" [.ftvar "c"])]
      [Statement.set "r" nilExpr .empty],
    mkProc "Foo" ["a"] [] [("x", .ftvar "a")]
-     [Statement.call "Mk" [.outArg "x"] .empty]] }
+     [Statement.call "Mk" none [.outArg "x"] .empty]] }
 
 /--
 info: error: Procedure 'Foo': Rigid type variable 'a' was refined to '(List _)'
@@ -170,12 +172,11 @@ info: error: Procedure 'Foo': Rigid type variable 'a' was refined to '(List _)'
 
 -- A call instantiates `T` once, so an `int` input with a `bool` output is rejected.
 private def inconsistentCallInstantiationPgm : Program := { decls :=
-  [mkProc "Identity" ["T"] [("x", .ftvar "T")] [("y", .ftvar "T")]
-     [Statement.set "y" eb[x] .empty],
+  [identityDecl,
    mkProc "Bad" [] [] [("result", .bool)]
      [Statement.init "n" (.forAll [] .int) (.det eb[#42]) .empty,
       Statement.init "b" (.forAll [] .bool) (.det eb[#true]) .empty,
-      Statement.call "Identity" [.inArg eb[n], .outArg "b"] .empty,
+      Statement.call "Identity" none [.inArg eb[n], .outArg "b"] .empty,
       Statement.set "result" eb[b] .empty]] }
 
 /--
@@ -189,13 +190,168 @@ private def openArgumentCallPgm : Program := { decls :=
   [.func anyFunction .empty,
    mkProc "F" [] [("x", .int)] [("y", .int)] [Statement.set "y" eb[x] .empty],
    mkProc "Bad" [] [] [("b", .bool)]
-     [Statement.call "F" [.inArg (.op Core.coreLoc "any" none), .outArg "b"] .empty]] }
+     [Statement.call "F" none [.inArg (.op Core.coreLoc "any" none), .outArg "b"] .empty]] }
 
 /--
 info: error: Procedure 'Bad': [call F]: argument types [_] and return types [bool] are incompatible with signature ([int]) → ([int])
 -/
 #guard_msgs (whitespace := lax) in
 #eval Std.format (Core.typeCheck .default openArgumentCallPgm)
+
+/-! ## Stored call type arguments -/
+
+/-- The type arguments stored on each call of `pgm` after type checking, in program order. -/
+private def checkedTyArgs (pgm : Program) : List (Option (List String)) :=
+  tyArgsOfResult (Core.typeCheck .default pgm)
+
+-- `Caller` calls `Identity<T>` with an `int`, so the checked call stores `int` for `T`.
+private def tyArgsStoredPgm : Program := { decls :=
+  [identityDecl,
+   mkProc "Caller" [] [] [("m", .int)]
+     [Statement.init "n" (.forAll [] .int) (.det eb[#42]) .empty,
+      Statement.call "Identity" none [.inArg eb[n], .outArg "m"] .empty]] }
+
+/-- info: [none] -/
+#guard_msgs in
+#eval callTyArgs tyArgsStoredPgm
+
+/--
+info: [Strata.Core] Type checking succeeded.
+
+---
+info: [some ["int"]]
+-/
+#guard_msgs in
+#eval checkedTyArgs tyArgsStoredPgm
+
+-- The checker computes the type arguments itself and ignores a value the call already carries.
+private def tyArgsBogusPgm : Program := { decls :=
+  [identityDecl,
+   mkProc "Caller" [] [] [("m", .int)]
+     [Statement.init "n" (.forAll [] .int) (.det eb[#42]) .empty,
+      Statement.call "Identity" (some [.forAll [] .bool]) [.inArg eb[n], .outArg "m"]
+        .empty]] }
+
+/-- info: [some ["bool"]] -/
+#guard_msgs in
+#eval callTyArgs tyArgsBogusPgm
+
+/--
+info: [Strata.Core] Type checking succeeded.
+
+---
+info: [some ["int"]]
+-/
+#guard_msgs in
+#eval checkedTyArgs tyArgsBogusPgm
+
+-- `Wrap<U>` calls `Identity<T>` with its own type parameter `U`, so the call stores `U`.
+private def tyArgsRigidPgm : Program := { decls :=
+  [identityDecl,
+   mkProc "Wrap" ["U"] [("a", .ftvar "U")] [("b", .ftvar "U")]
+     [Statement.call "Identity" none [.inArg eb[a], .outArg "b"] .empty]] }
+
+/--
+info: [Strata.Core] Type checking succeeded.
+
+---
+info: [some ["U"]]
+-/
+#guard_msgs in
+#eval checkedTyArgs tyArgsRigidPgm
+
+-- `Pair<A, B>` and `Swap<A, B>` list their type parameters in the same order but use them in
+-- opposite orders in the formals, so each call stores `[int, bool]`, in parameter order.
+private def tyArgsTwoParamPgm : Program := { decls :=
+  [mkProc "Pair" ["A", "B"] [("x", .ftvar "A"), ("y", .ftvar "B")] [("r", .ftvar "A")]
+     [Statement.set "r" eb[x] .empty],
+   mkProc "Swap" ["A", "B"] [("x", .ftvar "B"), ("y", .ftvar "A")] [("r", .ftvar "A")]
+     [Statement.set "r" eb[y] .empty],
+   mkProc "Caller" [] [] [("m", .int)]
+     [Statement.init "n" (.forAll [] .int) (.det eb[#42]) .empty,
+      Statement.init "b" (.forAll [] .bool) (.det eb[#true]) .empty,
+      Statement.call "Pair" none [.inArg eb[n], .inArg eb[b], .outArg "m"] .empty,
+      Statement.call "Swap" none [.inArg eb[b], .inArg eb[n], .outArg "m"] .empty]] }
+
+/--
+info: [Strata.Core] Type checking succeeded.
+
+---
+info: [some ["int", "bool"], some ["int", "bool"]]
+-/
+#guard_msgs in
+#eval checkedTyArgs tyArgsTwoParamPgm
+
+-- A call to a callee without type parameters stores the empty list.
+private def tyArgsMonomorphicPgm : Program := { decls :=
+  [mkProc "Inc" [] [("x", .int)] [("y", .int)] [Statement.set "y" eb[x] .empty],
+   mkProc "Caller" [] [] [("m", .int)]
+     [Statement.init "n" (.forAll [] .int) (.det eb[#42]) .empty,
+      Statement.call "Inc" none [.inArg eb[n], .outArg "m"] .empty]] }
+
+/--
+info: [Strata.Core] Type checking succeeded.
+
+---
+info: [some []]
+-/
+#guard_msgs in
+#eval checkedTyArgs tyArgsMonomorphicPgm
+
+-- Calls inside a block, both branches of a conditional and a loop body each store their own
+-- type arguments.
+private def tyArgsNestedPgm : Program := { decls :=
+  [identityDecl,
+   mkProc "Caller" [] [] [("m", .int), ("c", .bool)]
+     [Statement.init "n" (.forAll [] .int) (.det eb[#42]) .empty,
+      Statement.init "b" (.forAll [] .bool) (.det eb[#true]) .empty,
+      .block "blk" [Statement.call "Identity" none [.inArg eb[n], .outArg "m"] .empty] .empty,
+      .ite (.det eb[b])
+        [Statement.call "Identity" none [.inArg eb[b], .outArg "c"] .empty]
+        [Statement.call "Identity" none [.inArg eb[n], .outArg "m"] .empty] .empty,
+      .loop (.det eb[b]) none []
+        [Statement.call "Identity" none [.inArg eb[b], .outArg "c"] .empty] .empty]] }
+
+/--
+info: [Strata.Core] Type checking succeeded.
+
+---
+info: [some ["int"], some ["bool"], some ["int"], some ["bool"]]
+-/
+#guard_msgs in
+#eval checkedTyArgs tyArgsNestedPgm
+
+-- Calls in two blocks of a control-flow graph body each store their own type arguments.
+private def tyArgsCfgPgm : Program := { decls :=
+  [identityDecl,
+   cfgProc "Caller" [] [("m", .int), ("c", .bool)]
+     [("entry",
+       { cmds :=
+           [.cmd (.init "n" (.forAll [] .int) (.det eb[#42]) .empty),
+            .cmd (.init "b" (.forAll [] .bool) (.det eb[#true]) .empty),
+            .call "Identity" none [.inArg eb[n], .outArg "m"] .empty],
+         transfer := .goto "next" .empty }),
+      ("next",
+       { cmds := [.call "Identity" none [.inArg eb[b], .outArg "c"] .empty],
+         transfer := .finish .empty })]] }
+
+/--
+info: [Strata.Core] Type checking succeeded.
+
+---
+info: [some ["int"], some ["bool"]]
+-/
+#guard_msgs in
+#eval checkedTyArgs tyArgsCfgPgm
+
+-- `q<a>()` has no arguments, so the call does not determine `a`. The checker stores a generated
+-- type variable for it, which is not a type parameter of the caller, so it rejects the program.
+/--
+info: REJECTED: Procedure 'Caller': the call to 'q' does not determine one of its type
+parameters
+-/
+#guard_msgs (whitespace := lax) in
+#eval coreVerdict (Core.CallFixtures.qProg Core.CallFixtures.qReflDecl)
 
 /-! ## Distinct call results -/
 
@@ -209,7 +365,7 @@ private def repeatedOutCallPgm : Program := { decls :=
   [threeOutputs,
    mkProc "Caller" [] [] []
      [Statement.init "x" (.forAll [] .int) (.det eb[#0]) .empty,
-      Statement.call "three" [.outArg "x", .outArg "x", .outArg "x"] .empty]] }
+      Statement.call "three" none [.outArg "x", .outArg "x", .outArg "x"] .empty]] }
 
 /--
 info: error: Procedure 'Caller': [call three(out x, out x, out x);]: Ill-formed call: the call to three passes the variable x for more than one out parameter; the results of a call must be distinct variables
@@ -223,7 +379,7 @@ private def repeatedInoutOutCallPgm : Program := { decls :=
      [Statement.set "a" eb[#1] .empty, Statement.set "b" eb[#0] .empty],
    mkProc "Caller" [] [] []
      [Statement.init "g" (.forAll [] .int) (.det eb[#0]) .empty,
-      Statement.call "P" [.inoutArg "g", .outArg "g"] .empty]] }
+      Statement.call "P" none [.inoutArg "g", .outArg "g"] .empty]] }
 
 /--
 info: error: Procedure 'Caller': [call P(inout g, out g);]: Ill-formed call: the call to P passes the inout argument g for more than one inout or out parameter; an inout argument must not alias another result of the call
@@ -360,9 +516,8 @@ info: ok: program Core;
 
 procedure PostOnly<a> ()
 spec {
-  ensures [PostOnly_ensures_0]: forall q : (a) :: true;
-} {
-};
+  ensures [PostOnly_ensures_0]: forall q : a :: true;
+  } ;
 -/
 #guard_msgs (whitespace := lax) in
 #eval
@@ -403,9 +558,7 @@ function g<a> (x : a) : int;
 procedure PreCallCoincident<a> (y : a)
 spec {
   requires [PreCallCoincident_requires_0]: g(42) == 0;
-  } {
-
-};
+  } ;
 -/
 #guard_msgs (whitespace := lax) in
 #eval
@@ -433,9 +586,7 @@ function g<b> (x : b) : int;
 procedure PreCallRenamed<a> (y : a)
 spec {
   requires [PreCallRenamed_requires_0]: g(42) == 0;
-  } {
-
-};
+  } ;
 -/
 #guard_msgs (whitespace := lax) in
 #eval
@@ -491,9 +642,7 @@ function g<a> (x : a) : int;
 procedure PostCallCoincident<a> (y : a)
 spec {
   ensures [PostCallCoincident_ensures_0]: g(42) == 0;
-  } {
-
-};
+  } ;
 -/
 #guard_msgs (whitespace := lax) in
 #eval
@@ -582,9 +731,7 @@ function g<a> (x : a) : int;
 procedure PreCallAtParam<a> (y : a)
 spec {
   requires [PreCallAtParam_requires_0]: g(y) == 0;
-  } {
-
-};
+  } ;
 -/
 #guard_msgs (whitespace := lax) in
 #eval
@@ -765,7 +912,7 @@ info: ok: program Core;
  
 procedure NestedCaptureConsistent<a> (x : a, out z : a)
 {
-  var g : a -> a := fun y : (a) => y;
+  var g : a -> a := fun y : a => y;
   z := g(x);
 };
 -/
@@ -848,7 +995,7 @@ private def procDupTypeArgsPgm : Program :=
   { decls := [
       .proc { header := { name := "P", typeArgs := ["a", "a"], inputs := [], outputs := [] },
               spec := { preconditions := [], postconditions := [] },
-              body := .structured [] } .empty
+              body := .structured [] false } .empty
   ]}
 
 /--
@@ -863,7 +1010,7 @@ private def procDupReservedTypeArgsPgm : Program :=
       .proc { header := { name := "P", typeArgs := ["$__ty0", "$__ty0"], inputs := [],
                           outputs := [] },
               spec := { preconditions := [], postconditions := [] },
-              body := .structured [] } .empty
+              body := .structured [] false } .empty
   ]}
 
 /--
@@ -879,7 +1026,7 @@ private def procReservedTypeArgPgm : Program :=
       .proc { header := { name := "P", typeArgs := ["$__ty0"],
                           inputs := [("x", .ftvar "$__ty0")], outputs := [] },
               spec := { preconditions := [], postconditions := [] },
-              body := .structured [] } .empty
+              body := .structured [] false } .empty
   ]}
 
 /--
@@ -903,7 +1050,7 @@ private def procPrecondTypeArgPgm : Program :=
       .proc { header := { name := "P", typeArgs := ["$__precond_b"],
                           inputs := [("x", .ftvar "$__precond_b")], outputs := [] },
               spec := { preconditions := [], postconditions := [] },
-              body := .structured [] } .empty
+              body := .structured [] false } .empty
   ]}
 
 /--
@@ -926,7 +1073,7 @@ private def procDupInputsPgm : Program :=
       .proc { header := { name := "P", typeArgs := [],
                           inputs := [("x", .int), ("x", .int)], outputs := [] },
               spec := { preconditions := [], postconditions := [] },
-              body := .structured [] } .empty
+              body := .structured [] false } .empty
   ]}
 
 /--
@@ -941,7 +1088,7 @@ private def procDupOutputsPgm : Program :=
       .proc { header := { name := "P", typeArgs := [],
                           inputs := [], outputs := [("y", .int), ("y", .int)] },
               spec := { preconditions := [], postconditions := [] },
-              body := .structured [] } .empty
+              body := .structured [] false } .empty
   ]}
 
 /--
@@ -956,7 +1103,7 @@ private def procOldOutputPgm : Program :=
       .proc { header := { name := "P", typeArgs := [], inputs := [("g", .int)],
                           outputs := [("g", .int), ("old g", .bool)] },
               spec := { preconditions := [], postconditions := [] },
-              body := .structured [] } .empty
+              body := .structured [] false } .empty
   ]}
 
 /--
@@ -971,7 +1118,7 @@ private def procOldInputPgm : Program :=
       .proc { header := { name := "P", typeArgs := [],
                           inputs := [("g", .int), ("old g", .bool)], outputs := [("g", .int)] },
               spec := { preconditions := [], postconditions := [] },
-              body := .structured [] } .empty
+              body := .structured [] false } .empty
   ]}
 
 /--
@@ -985,7 +1132,7 @@ private def procReservedNamePgm : Program :=
   { decls := [
       .proc { header := { name := "$__tyP", typeArgs := [], inputs := [], outputs := [] },
               spec := { preconditions := [], postconditions := [] },
-              body := .structured [] } .empty
+              body := .structured [] false } .empty
   ]}
 
 /--
@@ -1008,7 +1155,7 @@ private def procReservedParamPgm : Program :=
       .proc { header := { name := "P", typeArgs := [], inputs := [("$__ty0", .int)],
                           outputs := [] },
               spec := { preconditions := [], postconditions := [] },
-              body := .structured [] } .empty
+              body := .structured [] false } .empty
   ]}
 
 /--
@@ -1030,7 +1177,7 @@ private def procModifiesInputPgm : Program :=
   { decls := [
       .proc { header := { name := "P", typeArgs := [], inputs := [("x", .int)], outputs := [] },
               spec := { preconditions := [], postconditions := [] },
-              body := .structured [Statement.set "x" (LExpr.intConst Core.coreLoc 1) .empty] }
+              body := .structured [Statement.set "x" (LExpr.intConst Core.coreLoc 1) .empty] false }
                   .empty
   ]}
 
@@ -1049,7 +1196,7 @@ private def localVarCollidesPgm : Program :=
               spec := { preconditions := [], postconditions := [] },
               body := .structured [
                 Statement.init "c" (.forAll [] .int) .nondet .empty
-              ] } .empty
+              ] false } .empty
   ]}
 
 /--
@@ -1065,7 +1212,7 @@ private def preUnknownVarProg : Program :=
                           inputs := [("x", mty[int])], outputs := [] },
               spec := { preconditions := [("pre_unknown", ⟨eb[z], .Default, #[]⟩)],
                         postconditions := [] },
-              body := .structured [] } .empty
+              body := .structured [] false } .empty
   ]}
 
 /--
@@ -1086,7 +1233,7 @@ private def preBinderCapturesFvarProg : Program :=
                           inputs := [("x", mty[int])], outputs := [] },
               spec := { preconditions := [("pre_capture", ⟨cond, .Default, #[]⟩)],
                         postconditions := [] },
-              body := .structured [] } .empty
+              body := .structured [] false } .empty
   ]}
 
 /--
@@ -1116,8 +1263,7 @@ info: ok: program Core;
 procedure PreOverInputs (x : int, y : int)
 spec {
   requires [PreOverInputs_requires_0]: x == y;
-} {
-};
+  } ;
 -/
 #guard_msgs (whitespace := lax) in
 #eval
@@ -1174,8 +1320,7 @@ info: ok: program Core;
 procedure PreQuantifierBinder (x : int)
 spec {
   requires [PreQuantifierBinder_requires_0]: forall q : int :: q == x;
-} {
-};
+  } ;
 -/
 #guard_msgs (whitespace := lax) in
 #eval
@@ -1275,7 +1420,7 @@ private def storedConditions (typeArgs : List TyIdentifier) (inputs : @LMonoTySi
       spec := { preconditions := pre.zipIdx.map fun (e, n) => (label n, { expr := e })
                 postconditions :=
                   post.zipIdx.map fun (e, n) => (label (pre.length + n), { expr := e }) }
-      body := .structured [] }
+      body := .structured [] false }
   match Core.Program.typeCheck initTyContext Env0 { decls := [.proc proc .empty] } with
   | .ok (p', _) => Std.format p'
   | .error e => f!"REJECTED: {e.message}"
@@ -1297,7 +1442,7 @@ info: program Core;
 
 procedure pp<b> ()
 spec {
-  requires [c0]: forall x : (b) :: x == x;
+  requires [c0]: forall x : b :: x == x;
   } {
   
 };
@@ -1373,7 +1518,7 @@ info: ok: program Core;
  
 procedure Outer<a> (p : a)
 {
-  var loc : int -> int := fun y : int => (if forall z : (a) :: z == z then y else y);
+  var loc : int -> int := fun y : int => (if forall z : a :: z == z then y else y);
 };
 -/
 #guard_msgs (whitespace := lax) in
@@ -1394,7 +1539,7 @@ ACCEPTED
                       outputs := [] }
           spec := { preconditions := [("c0", { expr := idfTrueEq ann })],
                     postconditions := [] }
-          body := .structured [] } .empty] }
+          body := .structured [] false } .empty] }
 
 open Core.TestUtil (idfDecl idfTrueEq printIdfVerdicts) in
 /--
@@ -1407,7 +1552,7 @@ ACCEPTED
   .proc { header := { name := "pp", typeArgs := ["a"], inputs := [("x", .ftvar "a")],
                       outputs := [] }
           spec := { preconditions := [], postconditions := [] }
-          body := .structured [Statement.assert "t" (idfTrueEq ann) .empty] } .empty] }
+          body := .structured [Statement.assert "t" (idfTrueEq ann) .empty] false } .empty] }
 
 /-! ## Ambient rigid type variables
 
@@ -1424,7 +1569,7 @@ private def ambientRigidProc (initTy : LMonoTy) : Procedure :=
     spec := { preconditions := [], postconditions := [] },
     body := .structured [
       .cmd (.cmd (.init "x" (.forAll [] initTy) (.det (.intConst Core.coreLoc 0)) #[]))
-    ] }
+    ] false }
 
 -- An ambient rigid `a` cannot be inferred as `int` from the initializer.
 /-- info: REJECTED: Procedure 'ambientRigid': an ambient rigid type variable was refined -/
@@ -1474,7 +1619,7 @@ private def reservedSignatureCallee : Procedure :=
       { name := "reservedCallee", typeArgs := [],
         inputs := [("x", .tcons "$__rigid_caller_a" [])], outputs := [] },
     spec := { preconditions := [], postconditions := [] },
-    body := .structured [] }
+    body := .structured [] false }
 
 private def reservedSignatureProgram : Program :=
   { decls := [.proc reservedSignatureCallee .empty] }
@@ -1485,9 +1630,9 @@ private def callerOfReservedSignature : Procedure :=
         inputs := [("x", .ftvar "a")], outputs := [] },
     spec := { preconditions := [], postconditions := [] },
     body := .structured [
-      Statement.call "reservedCallee"
+      Statement.call "reservedCallee" none
         [.inArg (LExpr.fvar Core.coreLoc "x" none)] .empty
-    ] }
+    ] false }
 
 -- The caller checked alone against a program declaring the callee is rejected at the call: the
 -- callee's signature names the unregistered type `$__rigid_caller_a`, which the caller's rigid
@@ -1545,7 +1690,7 @@ private def baseProcedure : Procedure :=
       outputs := []
     },
     spec := { preconditions := [], postconditions := [] },
-    body := .structured [] }
+    body := .structured [] false }
 
 private def postconditionAnnotated : Procedure :=
   { baseProcedure with
@@ -1562,7 +1707,7 @@ private def cfgCommandAnnotated : Procedure :=
         cmds := [.cmd (.assert "a" rigidEq .empty)],
         transfer := .finish .empty
       })]
-    } }
+    } false }
 
 private def cfgGuardAnnotated : Procedure :=
   { baseProcedure with
@@ -1572,7 +1717,7 @@ private def cfgGuardAnnotated : Procedure :=
         cmds := [],
         transfer := .condGoto rigidEq "entry" "entry" .empty
       })]
-    } }
+    } false }
 
 private def cfgIllTypedControl : Procedure :=
   { baseProcedure with
@@ -1582,7 +1727,7 @@ private def cfgIllTypedControl : Procedure :=
         cmds := [.cmd (.assert "not_bool" (LExpr.intConst Core.coreLoc 1) .empty)],
         transfer := .finish .empty
       })]
-    } }
+    } false }
 
 -- A postcondition annotation naming a type with the rigid prefix is rejected.
 /--
@@ -1607,6 +1752,100 @@ info: REJECTED: Procedure 'p', condition 'ens': Type $__rigid_a is not an instan
 #eval firstLineOf <| procedureVerdict cfgIllTypedControl
 
 end AnnotationHygiene
+
+/-! ## Unbound type variables in locals and call type arguments -/
+
+section UnboundTyVars
+
+/-- `p() { var y : 'b := * }`: no type parameter `b`, and nothing solves it. -/
+private def unboundLocalPgm : Program := { decls :=
+  [mkProc "p" [] [] [] [declNondet "y" (.ftvar "b")]] }
+
+/--
+info: REJECTED: Procedure 'p': local 'y' is declared at type variable 'b',
+which is not a type parameter of the procedure
+-/
+#guard_msgs (whitespace := lax) in
+#eval coreVerdict unboundLocalPgm
+
+/-- `p() { var y : 'b := *; var z : 'c := * }`: two written variables, both unsolved. The error
+    names both. -/
+private def twoUnboundLocalsPgm : Program := { decls :=
+  [mkProc "p" [] [] [] [declNondet "y" (.ftvar "b"), declNondet "z" (.ftvar "c")]] }
+
+/--
+info: REJECTED: Procedure 'p': local 'y' is declared at type variable 'b', which is not a type
+parameter of the procedure; local 'z' is declared at type variable 'c', which is not a type
+parameter of the procedure
+-/
+#guard_msgs (whitespace := lax) in
+#eval coreVerdict twoUnboundLocalsPgm
+
+/-- `Caller() { var y : 'b := *; call q() }`: a written unbound variable and a call that leaves
+    `q`'s type parameter undetermined. The error reports both. -/
+private def unboundLocalAndCallPgm : Program := { decls :=
+  [Core.CallFixtures.qReflDecl,
+   mkProc "Caller" [] [] []
+     [declNondet "y" (.ftvar "b"), Statement.call "q" none [] .empty]] }
+
+/--
+info: REJECTED: Procedure 'Caller': local 'y' is declared at type variable 'b', which is not a type
+parameter of the procedure; the call to 'q' does not determine one of its type parameters
+-/
+#guard_msgs (whitespace := lax) in
+#eval coreVerdict unboundLocalAndCallPgm
+
+/-- `Caller() { var x : 'b := *; call q(x) }` with `q<a>(x : a)`: the call determines `a`, but at
+    the written variable `b`, which is not a type parameter of `Caller`. -/
+private def callAtUnboundWrittenPgm : Program := { decls :=
+  [Core.CallFixtures.qArgDecl,
+   mkProc "Caller" [] [] []
+     [declNondet "x" (.ftvar "b"),
+      Statement.call "q" none [.inArg (.fvar Core.coreLoc ⟨"x", ()⟩ none)] .empty]] }
+
+/--
+info: REJECTED: Procedure 'Caller': local 'x' is declared at type variable 'b', which is not a type
+parameter of the procedure; the call to 'q' is instantiated at type variable 'b', which is not a
+type parameter of the procedure
+-/
+#guard_msgs in
+#eval coreVerdict callAtUnboundWrittenPgm
+
+/-- `p() { var x : 'b := *; var y : int := x }`: the written `b` is solved to `int`. -/
+private def solvedLocalPgm : Program := { decls :=
+  [mkProc "p" [] [] []
+    [declNondet "x" (.ftvar "b"),
+     Statement.init "y" (.forAll [] .int) (.det (.fvar Core.coreLoc ⟨"x", ()⟩ none)) .empty]] }
+
+/-- info: ACCEPTED -/
+#guard_msgs in
+#eval coreVerdict solvedLocalPgm
+
+/-- `p<a>() { var y : a := * }`: the local mentions only the procedure's own type parameter. -/
+private def polymorphicLocalPgm : Program := { decls :=
+  [mkProc "p" ["a"] [] [] [declNondet "y" (.ftvar "a")]] }
+
+/-- info: ACCEPTED -/
+#guard_msgs in
+#eval coreVerdict polymorphicLocalPgm
+
+-- An unsolved type variable on an operator annotation, not on a local, stays accepted.
+open Strata in
+private def opAnnotPgm :=
+#strata
+program Core;
+function n<a>() : a;
+procedure P()
+{
+  assert (n() == n());
+};
+#end
+
+/-- info: ACCEPTED -/
+#guard_msgs in
+#eval coreVerdict (translate opAnnotPgm)
+
+end UnboundTyVars
 
 ---------------------------------------------------------------------
 end Tests

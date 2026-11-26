@@ -201,9 +201,13 @@ private def parseProvenanceString (s : String) : Option Strata.Provenance :=
         | _, _ => none
       | _ => none
 
-/-- Translate a MetadataAnnEntry to a MetaDataElem (flags and string values only;
-    expression values are not yet supported). -/
-def translateMetadataAnnEntry (arg : Arg) :
+/-- Translate a MetadataAnnEntry to a MetaDataElem.
+
+    Expression values (`@[key = (e)]`) are translated with `translateE` when it is
+    given, and otherwise reported as an error: translating an expression needs the
+    bindings in scope at the annotation. -/
+def translateMetadataAnnEntry
+    (arg : Arg) (translateE : Option (Arg → TransM Core.Expression.Expr) := none) :
     TransM (Imperative.MetaDataElem Core.Expression) := do
   let .op op := arg
     | TransM.error s!"translateMetadataAnnEntry expected op {repr arg}"
@@ -227,14 +231,23 @@ def translateMetadataAnnEntry (arg : Arg) :
         | none => return { fld, value := .msg s }
       else
         return { fld := .label key, value := .msg s }
-    | q`Core.mdAnnValExpr, _ =>
-      TransM.error "translateMetadataAnnEntry: expression values not yet supported"
+    | q`Core.mdAnnValExpr, #[eArg] =>
+      match translateE with
+      | some f => return { fld := .label key, value := .expr (← f eArg) }
+      | none =>
+        let pos := (← StateT.get).inputCtx.fileMap.toPosition valArg.ann.start
+        TransM.recordError
+          s!"{pos.line}:{pos.column}: annotation `{key}`: an expression value \
+             (`@[{key} = (e)]`) is supported only on a CFG block"
+          { fld := .label key, value := .switch true }
     | _, _ => TransM.error s!"translateMetadataAnnEntry: unexpected value {repr valOp.name}"
   | _, _ => TransM.error s!"translateMetadataAnnEntry: unexpected {repr op.name}"
 
 /-- Translate an Option MetadataAnn argument into MetaData.
-    Returns empty metadata if the annotation is absent. -/
-def translateOptMetadataAnn (arg : Arg) :
+    Returns empty metadata if the annotation is absent. Expression values are
+    translated with `translateE` (see `translateMetadataAnnEntry`). -/
+def translateOptMetadataAnn
+    (arg : Arg) (translateE : Option (Arg → TransM Core.Expression.Expr) := none) :
     TransM (Imperative.MetaData Core.Expression) := do
   let .option _ ann := arg
     | TransM.error s!"translateOptMetadataAnn unexpected {repr arg}"
@@ -244,7 +257,7 @@ def translateOptMetadataAnn (arg : Arg) :
     let .op annOp := annArg
       | TransM.error s!"translateOptMetadataAnn expected op {repr annArg}"
     let _ ← checkOpArg annArg q`Core.mdAnn 1
-    let entries ← translateCommaSep translateMetadataAnnEntry annOp.args[0]!
+    let entries ← translateCommaSep (translateMetadataAnnEntry · translateE) annOp.args[0]!
     return entries
 
 /-- Merge explicit annotation metadata (`annMd`) into source-position metadata
@@ -984,6 +997,10 @@ private def translateFnTable : Std.HashMap QualifiedIdent Core.Expression.Expr :
   (q`Core.str_at, Core.strAtOp),
   (q`Core.str_lt, Core.strLtOp),
   (q`Core.str_le, Core.strLeOp),
+  (q`Core.str_to_code, Core.strToCodeOp),
+  (q`Core.str_from_code, Core.strFromCodeOp),
+  (q`Core.str_from_int, Core.strFromIntOp),
+  (q`Core.str_to_int, Core.strToIntOp),
   (q`Core.re_all, Core.reAllOp),
   (q`Core.re_allchar, Core.reAllCharOp),
   (q`Core.re_range, Core.reRangeOp),
@@ -1267,6 +1284,10 @@ partial def translateExpr (p : Program) (bindings : TransBindings) (arg : Arg) :
     | q`Core.bvextract_31_0_64
     | q`Core.str_len
     | q`Core.str_toregex
+    | q`Core.str_to_code
+    | q`Core.str_from_code
+    | q`Core.str_from_int
+    | q`Core.str_to_int
     | q`Core.re_star
     | q`Core.re_plus
     | q`Core.re_comp => do
@@ -1742,7 +1763,7 @@ partial def translateStmt (p : Program) (bindings : TransBindings) (arg : Arg) :
         callArgs := callArgs ++ [.inArg (← translateExpr p bindings bargs[0]!)]
       | _ => TransM.error s!"translateCallArg: unexpected op {repr aop.name}"
     let md ← getMetaDataWithAnn op annotsArg
-    return ([.call f callArgs md], bindings)
+    return ([.call f none callArgs md], bindings)
   | q`Core.block_statement, #[annotsArg, la, ba] =>
     let l ← translateIdent String la
     let (ss, innerBindings) ← translateBlock p bindings ba
@@ -1999,9 +2020,19 @@ def translateProcBindings (bindings : TransBindings) (bop : Arg) :
     LExpr.fvar translateLoc id ty)
   return (inputs, outputs, { bindings with boundVars := bindings.boundVars ++ param_bindings })
 
+/-- The opaque flag of a procedure body: `true` when the optional `opaque` mark is present. -/
+def translateOptionOpaque (arg : Arg) : TransM Bool := do
+  let .option _ opq := arg
+    | TransM.error s!"translateOptionOpaque unexpected {repr arg}"
+  match opq with
+  | some f =>
+    let _ ← checkOpArg f q`Core.opaque_mark 0
+    return true
+  | none => return false
+
 def translateProcedure (p : Program) (bindings : TransBindings) (op : Operation) :
   TransM (Core.Decl × TransBindings) := do
-  let _ ← @checkOp (Core.Decl × TransBindings) op q`Core.command_procedure 6
+  let _ ← @checkOp (Core.Decl × TransBindings) op q`Core.command_procedure 7
   let annotsArg := op.args[0]!
   let pname ← translateIdent Core.CoreIdent op.args[1]!
   let typeArgs ← translateTypeArgs op.args[2]!
@@ -2011,9 +2042,14 @@ def translateProcedure (p : Program) (bindings : TransBindings) (op : Operation)
     | TransM.error s!"translateProcedure spec. expected here: {repr op.args[4]!}"
   let (requires, ensures) ←
     if speca.isSome then translateSpec p pname bindings speca.get! else pure ([], [])
-  let .option _ bodya := op.args[5]!
-    | TransM.error s!"translateProcedure body expected here: {repr op.args[5]!}"
-  let (body, bindings) ← if bodya.isSome then translateBlock p bindings bodya.get! else pure ([], bindings)
+  let opq ← translateOptionOpaque op.args[5]!
+  let .option _ bodya := op.args[6]!
+    | TransM.error s!"translateProcedure body expected here: {repr op.args[6]!}"
+  -- A procedure without a body is abstract, and so opaque, with or without the mark.
+  let (body, bindings) ← if bodya.isSome then
+      let (ss, bindings) ← translateBlock p bindings bodya.get!
+      pure (Imperative.Body.structured ss opq, bindings)
+    else pure (.abstract, bindings)
   let origBindings := { origBindings with gen := bindings.gen }
   let md ← getMetaDataWithAnn op annotsArg
   return (.proc { header := { name := pname,
@@ -2022,7 +2058,7 @@ def translateProcedure (p : Program) (bindings : TransBindings) (op : Operation)
                               outputs := ret },
                   spec := { preconditions := requires,
                             postconditions := ensures },
-                  body := .structured body
+                  body := body
                 }
                 md,
           origBindings)
@@ -2042,7 +2078,7 @@ def translateBlockCommand (p : Program) (bindings : TransBindings) (op : Operati
                               outputs := [] },
                   spec := { preconditions := [],
                             postconditions := [] },
-                  body := .structured body
+                  body := .structured body false
                 }
                 md,
           { bindings with gen := blockBindings.gen })
@@ -2053,7 +2089,8 @@ def translateBlockCommand (p : Program) (bindings : TransBindings) (op : Operati
 
 private instance : Inhabited TransBindings := ⟨{}⟩
 private instance : Inhabited (Imperative.DetTransferCmd String Core.Expression) := ⟨.finish .empty⟩
-private instance : Inhabited (Imperative.BasicBlock (Imperative.DetTransferCmd String Core.Expression) Core.Command) := ⟨⟨[], .finish .empty⟩⟩
+private instance : Inhabited (Imperative.BasicBlock (Imperative.DetTransferCmd String Core.Expression)
+    Core.Command Core.Expression) := ⟨{ cmds := [], transfer := .finish .empty }⟩
 private instance : Inhabited (Imperative.CFG String (Imperative.DetBlock String Core.Command Core.Expression)) := ⟨⟨"", []⟩⟩
 
 partial def translateTransfer (p : Program) (bindings : TransBindings) (arg : Arg) :
@@ -2073,7 +2110,7 @@ partial def translateTransfer (p : Program) (bindings : TransBindings) (arg : Ar
     -- `translateCFGBlock`) so the type checker can see it. The symbolic evaluator
     -- leaves the fvar unchanged, so `evalCFGStep` forks into both paths; the
     -- concrete interpreter (runCFG) errors on it, as expected.
-    let condName : Core.CoreIdent := ⟨s!"$__nondet_{bindings.gen.var_def}", ()⟩
+    let condName : Core.CoreIdent := ⟨s!"{Core.nondetChoicePrefix}{bindings.gen.var_def}", ()⟩
     let bindings := incrNum .var_def bindings
     let boolMono := Lambda.LMonoTy.bool
     let boolTy : Lambda.LTy := .forAll [] boolMono
@@ -2089,14 +2126,22 @@ partial def translateTransfer (p : Program) (bindings : TransBindings) (arg : Ar
     return ([], .finish md, bindings)
   | _ => TransM.error s!"translateTransfer: unknown transfer {repr op.name}"
 
-/-- Translate a single CFG block -/
+/-- Translate a single CFG block.
+
+    The block's annotations become its metadata (`BasicBlock.md`). Only the
+    explicit annotations are stored: unlike a statement, a block gets no derived
+    `provenance` entry (its source location is on its transfer), so an
+    unannotated block has empty metadata. Expression values are translated in the
+    bindings in scope at the start of the block. -/
 partial def translateCFGBlock (p : Program) (bindings : TransBindings) (arg : Arg) :
-  TransM (String × Imperative.BasicBlock (Imperative.DetTransferCmd String Core.Expression) Core.Command × TransBindings) := do
+  TransM (String × Imperative.BasicBlock (Imperative.DetTransferCmd String Core.Expression)
+    Core.Command Core.Expression × TransBindings) := do
   let .op op := arg
     | TransM.error s!"translateCFGBlock expected op {repr arg}"
-  let label ← translateIdent String op.args[0]!
+  let blockMd ← translateOptMetadataAnn op.args[0]! (some (translateExpr p bindings))
+  let label ← translateIdent String op.args[1]!
   -- `cfg_cmds_nil` has no commands; `cfg_cmds` holds a non-empty sequence.
-  let stmts : Array Arg ← match op.args[1]! with
+  let stmts : Array Arg ← match op.args[2]! with
     | .op cmdsOp =>
       match cmdsOp.name with
       | q`Core.cfg_cmds_nil => pure #[]
@@ -2117,14 +2162,15 @@ partial def translateCFGBlock (p : Program) (bindings : TransBindings) (arg : Ar
         match stmt with
         | .cmd c => cmds := cmds.push c
         | _ => TransM.error s!"translateCFGBlock: only commands allowed in CFG blocks, got statement"
-  let (transferCmds, transfer, bindings') ← translateTransfer p bindings op.args[2]!
+  let (transferCmds, transfer, bindings') ← translateTransfer p bindings op.args[3]!
   -- Append any commands the transfer needs declared in scope (e.g. the
   -- `$__nondet_N` declaration for a nondeterministic goto).
-  return (label, ⟨cmds.toList ++ transferCmds, transfer⟩, bindings')
+  return (label, { cmds := cmds.toList ++ transferCmds, transfer, md := blockMd }, bindings')
 
 /-- Translate a list of CFG blocks -/
 partial def translateCFGBlocks (p : Program) (bindings : TransBindings) (arg : Arg) :
-  TransM (List (String × Imperative.BasicBlock (Imperative.DetTransferCmd String Core.Expression) Core.Command) × TransBindings) := do
+  TransM (List (String × Imperative.BasicBlock (Imperative.DetTransferCmd String Core.Expression)
+    Core.Command Core.Expression) × TransBindings) := do
   let .op op := arg
     | TransM.error s!"translateCFGBlocks expected op {repr arg}"
   match op.name with
@@ -2149,7 +2195,7 @@ partial def translateCFGBody (p : Program) (bindings : TransBindings) (arg : Arg
 /-- Translate a procedure with CFG body -/
 def translateCFGProcedure (p : Program) (bindings : TransBindings) (op : Operation) :
   TransM (Core.Decl × TransBindings) := do
-  let _ ← @checkOp (Core.Decl × TransBindings) op q`Core.command_cfg_procedure 6
+  let _ ← @checkOp (Core.Decl × TransBindings) op q`Core.command_cfg_procedure 7
   let annotsArg := op.args[0]!
   let pname ← translateIdent Core.CoreIdent op.args[1]!
   let typeArgs ← translateTypeArgs op.args[2]!
@@ -2159,7 +2205,8 @@ def translateCFGProcedure (p : Program) (bindings : TransBindings) (op : Operati
     | TransM.error s!"translateCFGProcedure spec expected: {repr op.args[4]!}"
   let (requires, ensures) ←
     if speca.isSome then translateSpec p pname bindings speca.get! else pure ([], [])
-  let (cfg, bindings) ← translateCFGBody p bindings op.args[5]!
+  let opq ← translateOptionOpaque op.args[5]!
+  let (cfg, bindings) ← translateCFGBody p bindings op.args[6]!
   let origBindings := { origBindings with gen := bindings.gen }
   let md ← getMetaDataWithAnn op annotsArg
   return (.proc { header := { name := pname,
@@ -2168,7 +2215,7 @@ def translateCFGProcedure (p : Program) (bindings : TransBindings) (op : Operati
                               outputs := ret },
                   spec := { preconditions := requires,
                             postconditions := ensures },
-                  body := .cfg cfg
+                  body := .cfg cfg opq
                 }
                 md,
           origBindings)

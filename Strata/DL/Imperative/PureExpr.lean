@@ -191,10 +191,11 @@ class LawfulHasBool (P : PureExpr) [HasBool P] [HasFvars P] where
   tt_getFvars : HasFvars.getFvars (P := P) HasBool.tt = []
   ff_getFvars : HasFvars.getFvars (P := P) HasBool.ff = []
 
-/-- Boolean operations: not, and, imp. -/
+/-- Boolean operations: not, and, or, imp. -/
 class HasBoolOps (P : PureExpr) extends HasBool P where
   not : P.Expr → P.Expr
   and : P.Expr → P.Expr → P.Expr
+  or : P.Expr → P.Expr → P.Expr
   imp : P.Expr → P.Expr → P.Expr
 
 /-! ## Typing of expressions
@@ -219,6 +220,11 @@ class HasTyping (P : PureExpr) where
     (f : P.Factory) (σ : P.Ident → Option P.Val) (Γ : VarTyping P) : Prop :=
   ∀ x ty, Γ x = some ty → ∃ v, σ x = some v ∧ HasVal.valueOfTy f v ty
 
+
+/-- The store `σ` binds no variable that the typing `Γ` leaves untyped. A declaration `init x`
+    needs `x` unbound, so a store that already binds an untyped `x` blocks it. -/
+@[expose] def StoreFresh {P : PureExpr} (σ : P.Ident → Option P.Val) (Γ : VarTyping P) : Prop :=
+  ∀ x, Γ x = none → σ x = none
 
 /-- Extend the typing `Γ` with the typed definitions `defs`; the first definition of a
     name wins. -/

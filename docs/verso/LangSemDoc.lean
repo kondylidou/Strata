@@ -43,6 +43,8 @@ import Strata.Transform.SpecHoareConnection
 import Strata.Transform.SpecificationProps
 import Strata.Transform.InsertLoopInvariantAssertsCoreCorrect
 import Strata.Languages.Core.Logic.LangDef
+import Strata.DL.Imperative.Logic.HoareTotalTemplate
+import Strata.Languages.Core.Logic.ContractToHoareTriple
 
 open Lambda
 open Imperative
@@ -356,17 +358,17 @@ the name conditions.
 
 Core's commands are the imperative commands plus a procedure `call`. Procedure
 bodies are typed by
-{name Core.TypeSpec.CmdExtHasTypeΔ'}`CmdExtHasTypeΔ'`, which extends the
-imperative commands' relation {name Core.TypeSpec.CmdHasTypeΔ'}`CmdHasTypeΔ'`
+{name Core.TypeSpec.CmdExtHasType}`CmdExtHasType`, which extends the
+imperative commands' relation {name Core.TypeSpec.CmdHasType}`CmdHasType`
 with `call`. Both relations read each expression's annotations through the
 environment of written type variables in scope. A type variable written in a
 variable declaration's type denotes one type until the end of its block, branch
 or loop body: after `var x : a := …`, a later annotation `a` in the same block
 means the same type.
 
-{docstring Core.TypeSpec.CmdExtHasTypeΔ'}
+{docstring Core.TypeSpec.CmdExtHasType}
 
-{docstring Core.TypeSpec.CmdHasTypeΔ'}
+{docstring Core.TypeSpec.CmdHasType}
 
 ### Datatypes
 
@@ -380,22 +382,22 @@ is compatible with the written one
 ### Functions
 
 Function declarations (recursive or not) are governed by
-{name Core.TypeSpec.FuncHasType'}`FuncHasType'`, applied to a renaming of their
-reserved type parameters
+{name Core.TypeSpec.FuncHasTypeExact}`FuncHasTypeExact`, applied to a renaming
+of their reserved type parameters
 ({name Core.TypeSpec.FuncAlphaVariant}`FuncAlphaVariant`).
 
-{docstring Core.TypeSpec.FuncHasType'}
+{docstring Core.TypeSpec.FuncHasTypeExact}
 
 ### Procedures
 
 Procedure declarations are governed by
-{name Core.TypeSpec.ProcHasType'}`ProcHasType'`, applied to a renaming of their
-reserved type parameters
+{name Core.TypeSpec.ProcHasTypeExact}`ProcHasTypeExact`, applied to a renaming
+of their reserved type parameters
 ({name Core.TypeSpec.ProcAlphaVariant}`ProcAlphaVariant`); its `bodyTyped` field
-defers to {name Core.TypeSpec.ProcBodyHasType'}`ProcBodyHasType'`,
-which accepts only structured bodies (CFG bodies carry no typing obligation).
+defers to {name Core.TypeSpec.ProcBodyHasType}`ProcBodyHasType`,
+which types structured bodies and places no obligation on CFG bodies.
 
-{docstring Core.TypeSpec.ProcHasType'}
+{docstring Core.TypeSpec.ProcHasTypeExact}
 
 ### Programs
 
@@ -417,6 +419,16 @@ Core extends the `Imperative` commands with a procedure `call`. A call is
 executed by descending into the callee's body
 ({name Imperative.EvalCmdExtE.call_sem}`EvalCmdExtE.call_sem`).
 
+The callee a call runs is the named procedure instantiated at the call's type
+arguments ({name Imperative.Calls.typeInstantiatedCallee}`Calls.typeInstantiatedCallee`),
+which the type checker records on the call. Instantiating substitutes the type arguments for
+the procedure's type parameters throughout its signature, contract and body
+({name Core.Procedure.instantiateTypes}`Procedure.instantiateTypes`), so a polymorphic
+procedure runs at the types of the call. A call without type arguments runs a monomorphic
+callee as it is, and a call whose type arguments do not instantiate the callee (a wrong
+number of them, or none for a polymorphic callee) has no step. The steps below
+are those of this instance.
+
 1. Evaluate the input and inout argument expressions, and read the current values
    of caller-side `out` actuals.
 2. Initialize a fresh callee frame: bind input and inout formals to the evaluated
@@ -433,7 +445,8 @@ inlining transform exactly semantics-preserving.
 A contract version of call semantics is also defined at
 {name Imperative.EvalCmdExtContractE.call_sem}`EvalCmdExtContractE.call_sem`. It does not
 execute the body: after checking preconditions, it havocs all initialized callee
-output formals, including inouts, and assumes the postconditions. In this semantics, procedure
+output formals, including inouts, and assumes the postconditions, of the same instance of the
+callee. In this semantics, procedure
 inlining becomes an underapproximating transform because it replaces the values
 of havoc'ed output variables with concrete values.
 
@@ -560,10 +573,17 @@ assumptions.
 
 A partial-correctness Hoare triple `Strata.Logic.Hoare.TripleWith`
 ([`Logic/HoareTemplate.lean`](https://github.com/strata-org/Strata/blob/main/Strata/DL/Imperative/Logic/HoareTemplate.lean)),
-states that any run of `s` from an initial environment satisfying `Pre` that
-reaches a terminal or exiting (like `break` in C/Java) configuration emits an
-assertion-valid trace under its supplied condition interpreter.  If that trace is
-`Trace.Reachable`, the final environment also satisfies `Post`.
+states that every finite execution of `s` from an initial environment satisfying `Pre`,
+finished or not, emits an assertion-valid trace under its supplied condition interpreter,
+and that every run reaching a terminal or exiting (like `break` in C/Java) configuration
+along a `Trace.Reachable` trace ends in an environment satisfying `Post`. So
+`{True} assert false; while (true) {} {Post}` holds for no `Post`, although the program
+never finishes. With the trivial postcondition, the triple is
+`AllAssertsValidOnTracesWhen` over the admitted entries.
+
+{docstring Strata.Logic.Hoare.TripleWith}
+
+{docstring Strata.Logic.Hoare.TripleWith.true_iff_allAssertsValidOnTracesWhen}
 
 For Imperative's structured statements, since Imperative doesn't fix command type
 and wellformedness of the statement, the structural rules (`consequence`, `seq_append`,
@@ -589,17 +609,115 @@ Core procedure can be translated into a Hoare triple.
 [`Core/Logic/ContractToHoareTriple.lean`](https://github.com/strata-org/Strata/blob/main/Strata/Languages/Core/Logic/ContractToHoareTriple.lean),
 `Procedure.contractTriple` reads a `spec { requires ...; ensures ...; }` as a triple
 over the body — the `requires` clauses (including `free` ones, which the caller
-guarantees) as precondition, and the checked, non-`free` `ensures` clauses as
+guarantees) together with the typing of the inputs and outputs as precondition, and the
+checked, non-`free` `ensures` clauses as
 postcondition (`free` postconditions are assumed at call sites, not proved by the
 body) — so that "this procedure meets its contract" is a single Hoare judgement.
+For a polymorphic procedure, the judgement asks every instance of the procedure
+(`Procedure.instantiateTypes`) to meet the instantiated contract, since a call may run
+any of them; a monomorphic procedure has one instance, itself.
 The precondition also assumes the axioms and `distinct` declarations that precede
 the procedure, as the entry environments of `ProcedureAssertsValidOnTraces` do, and
-a proved `Procedure.contractTriple` gives the contract part of that property
-(`contract_of_contractTriple`).
+a proved `Procedure.contractTriple` of a structured body gives that property
+(`procedureAssertsValidOnTraces_of_contractTriple`): both validate the assertions of every
+finite execution and the postconditions of every finished run. For a polymorphic procedure,
+it does so through its instance at its own type parameters.
+At a call, the axioms of a callee declared no later than the caller follow from the
+caller's entry when they read no variable (`AxiomsBeforeProcedureDecl.callee`).
 `StrataTest/Languages/Core/Tests/Logic/Hoare.lean` has examples of Hoare triples
-derived from procedure contracts and their proofs, and
+derived from procedure contracts and their proofs,
 `StrataTest/Languages/Core/Tests/Logic/HoareAxioms.lean` has contracts that rest on
-an axiom or a `distinct` declaration.
+an axiom or a `distinct` declaration, and
+`StrataTest/Languages/Core/Tests/Logic/HoarePolymorphicProcedure.lean` proves, at every type,
+the partial and total contracts of polymorphic procedures that call polymorphic and monomorphic
+procedures and are called by monomorphic ones, of a polymorphic procedure with a CFG body, and of
+one that calls a polymorphic function.
+
+### Total Correctness
+
+The partial triple owes no postcondition at a run that never finishes, so a program that
+diverges or gets stuck, with valid assertions, meets every partial triple. Termination is
+stated with the
+must-termination predicate of `EventLang`: a configuration must terminate when it has
+finished, or when it can step and every successor must terminate. It is inductive, so it
+excludes infinite executions, and its progress premise excludes stuck ones.
+`EventLang.Terminates s ρ₀` is must-termination of the configuration that starts `s` at
+`ρ₀`, while `EventLang.TerminatesAt` above describes one finished run.
+
+{docstring Strata.Logic.EventLang.MustTerminate}
+
+An `assume` does not block a run: it emits its condition and the run continues, so a run
+whose assumptions no single world satisfies is unreachable. Total correctness asks for
+termination only of the executions an `assume` does not rule out, and for their assertions
+to hold. Must-termination with valid assertions fixes a world of the condition
+interpretation, follows only the steps whose `assume` events hold in it, and asks that the
+assertions of every step it follows hold in it; `EventLang.TerminatesAndAssertsValid s ρ₀`
+asks for it in every world. Its progress premise stays operational, so a configuration with
+no step is still excluded.
+
+{docstring Strata.Logic.EventLang.MustTerminateAndAssertsValid}
+
+The total-correctness triple `Strata.Logic.HoareTotal.TripleWith`
+([`Logic/HoareTotalTemplate.lean`](https://github.com/strata-org/Strata/blob/main/Strata/DL/Imperative/Logic/HoareTotalTemplate.lean))
+asks for `TerminatesAndAssertsValid` from every admitted entry satisfying `Pre`, and for
+`Post` at the end of every finished run whose trace is reachable. It amounts to the partial
+triple together with `TerminatesAndAssertsValid`, since that condition gives the validity of
+the assertions of every finite execution. Since only reachable runs owe `Post`, an `assume` may
+feed the postcondition: `{True} havoc x; assume x > 0 {x > 0}` holds, and so does
+`{True} assume false; while (true) {} {False}`, whose divergent run is
+unreachable. The rules compose because the condition is per world: in a fixed world, the
+prefix of a run whose assumptions hold there is reachable, so the intermediate assertion or
+the loop invariant holds where the rest of the run starts. Because assertions are checked
+step by step, a total triple validates the assertions of every finite execution, finished
+or not, as the partial triple does. Checking them only on finished runs would let
+`assume x > 0; assert false; assume x < 0; while (true) {}` meet any total triple: it has no
+finished run, and it diverges only after an assumption that fails in every world reaching
+the failing assertion.
+
+{docstring Strata.Logic.HoareTotal.TripleWith}
+
+{docstring Strata.Logic.HoareTotal.TripleWith.to_partial}
+
+{docstring Strata.Logic.HoareTotal.TripleWith.of_partial_of_true}
+
+{docstring Strata.Logic.HoareTotal.TripleWith.allAssertsValidOnTracesWhen}
+
+The rules in `Imperative.Logic.HoareTotal` are the partial rules with a proof of
+termination with valid assertions.
+Rules that choose a branch also require that the condition evaluates to a Boolean, since a
+run whose condition does not evaluate is stuck, and the loop rule takes a natural-number
+measure that every iteration decreases. A loop's `decreases` clause can supply that measure,
+read off the integer it evaluates to.
+
+{docstring Imperative.Logic.HoareTotal.while_rule}
+
+Strata Core instantiates it as `Core.Logic.HoareTotal.Triple`
+([`Core/Logic/HoareTotal.lean`](https://github.com/strata-org/Strata/blob/main/Strata/Languages/Core/Logic/HoareTotal.lean)),
+whose command rules are the partial ones together with the condition that the command can
+execute (for an assignment, that the right-hand side evaluates to a value of the type of the
+value the variable holds). `Procedure.contractTripleTotal` reads a procedure's contract under
+total correctness, with the same precondition and postcondition as `Procedure.contractTriple`:
+it is `contractTriple` together with termination with valid assertions of the body
+(`Procedure.contractTripleTotal_iff`), for either body kind. `TripleUnstructured` has no proof
+rules yet, so a procedure with a CFG body proves its total contract from its partial contract
+and a direct proof of that termination.
+
+The termination a Core total triple guarantees counts a call as one step: `call_sem` runs the
+callee's body to completion inside a single command step, so a call steps as soon as some run
+of the callee finishes. `Core.Logic.HoareTotal.Procedure.call_of_contract` is the partial call
+rule together with the premises that make the call execute: the call's type arguments
+instantiate the callee, and there are a callee entry store, a finished run of the body, and a
+write-back. Both call rules state their premises of the instance the call runs. A finished run can come from the callee's
+`contractTripleTotal` when no `assume` of its body can fail.
+`StrataTest/Languages/Core/Tests/Logic/HoareTotal.lean` proves the total-correctness contracts
+of two counting loops, the two examples above about `assume`, and that the program above
+with a reachable failing assertion meets no total triple, and
+`StrataTest/Languages/Core/Tests/Logic/HoareTotalCall.lean` applies `call_of_contract` to a
+call of one of the loops.
+
+{docstring Core.Logic.HoareTotal.Triple}
+
+{docstring Core.Logic.Hoare.Procedure.contractTripleTotal}
 
 ## Satisfiability and Validity of Assertions
 
@@ -618,10 +736,9 @@ satisfiability follows the same existential trace pattern.
 
 {docstring Imperative.Specification.AssertSatisfiableOnTraces}
 
-The event Hoare triple validates every completed trace and gates its
-postcondition on joint satisfiability of that trace's assumptions.  Trace
-validity above quantifies over every finite prefix, so the two notions are
-separate unless an additional progress or trace-extension result relates them.
+With the trivial postcondition, the event Hoare triple is `AllAssertsValidOnTracesWhen` over
+the entries its precondition and gate admit
+(`Strata.Logic.Hoare.TripleWith.true_iff_allAssertsValidOnTracesWhen`).
 
 ### Soundness and Completeness of Analysis
 
@@ -654,10 +771,12 @@ Transformations must not change what the verifier concludes. The definitions in
 `Strata/Transform/Specification.lean` can relate different source and target
 languages.
 
-The analysis-specific {name Imperative.Specification.Transform.Sound}`Sound`
+The analysis-specific
+{name Imperative.Specification.Transform.AssertValidityPreservedWhen}`AssertValidityPreservedWhen`
 predicate relates two `EventLang` values under one condition interpretation. It
-states that validity of each target assertion on reachable traces implies the
-corresponding source validity, so a verified output certifies the input.
+states that, for source statements meeting a precondition, validity of each
+target assertion on reachable traces implies the corresponding source validity,
+so a verified output certifies the input.
 
 The operational definitions are more general across analyses and support
 horizontal and vertical composition. They are the primary specifications for

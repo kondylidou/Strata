@@ -7,6 +7,7 @@ module
 
 public import Strata.Cli.Framework
 public import Strata.Languages.Core.Verifier
+import Std.Sync.Mutex
 
 /-! # Verify-options flag parsing
 
@@ -59,14 +60,34 @@ def verifyOptionsFlags : List Flag := [
     help := "Solver timeout in seconds (default: 10).",
     takesArg := .arg "seconds" },
   { name := "vc-directory",
-    help := "Store VCs in SMT-Lib format in <dir>.",
+    help := "Store VCs in SMT-Lib format in <dir>. Runs may share <dir>: each verdict is \
+      the answer to its own run's query, and a file both runs name holds the last writer's. \
+      Hidden .strata-<hex>.smt2 files left by an interrupted run are safe to delete.",
     takesArg := .arg "dir" },
   { name := "no-solve",
     help := "Generate SMT-Lib files but do not invoke the solver." },
+  { name := "lean-directory",
+    help := "Store in <dir>, as Lean theorems with an open proof, the validity checks the \
+             solver leaves undecided (unknown or timeout). Results are unchanged. What became \
+             of each check is appended to <dir>/export.log, or printed on stderr when it \
+             cannot be. docs/LeanExport.md says which checks are never exported.",
+    takesArg := .arg "dir" },
+  { name := "lean-scope",
+    help := s!"Which validity checks --lean-directory stores, by the solver's answer: \
+              {Core.LeanExport.Scope.options}. Default: 'undecided'. 'all' also works with \
+              --no-solve.",
+    takesArg := .arg "scope" },
   { name := "stop-on-first-error",
     help := "Exit after the first verification error." },
   { name := "use-array-theory",
     help := "Use SMT-LIB Array theory instead of axiomatized maps." },
+  { name := "cvc5-full-saturate-quant",
+    help := "With cvc5, fall back to enumerative quantifier instantiation (--full-saturate-quant) on every query. A satisfiability check (--check-level full) of a satisfiable property may then run until the time limit; --cvc5-retry-full-saturate-quant applies the fallback to the validity check only." },
+  { name := "cvc5-retry-full-saturate-quant",
+    help := "With cvc5, retry a query cvc5 reports unknown (incomplete) with --full-saturate-quant, keeping only a proof. Ignored under --incremental, which has no retry." },
+  { name := "cvc5-retry-timeout",
+    help := "Time limit in seconds of the cvc5 retry (0: the query's own limit, or 10 when the query has none). It bounds only the retry; the probe that first asks cvc5 why it answered unknown reruns the query under the query's own limit.",
+    takesArg := .arg "seconds" },
   { name := "remove-irrelevant-axioms",
     help := "Prune irrelevant axioms: 'off', 'aggressive', 'precise', \
       or 'directed'.",
@@ -86,17 +107,20 @@ def verifyOptionsFlags : List Flag := [
     takesArg := .arg "N|none" },
   { name := "vcgen",
     help := "(experimental) Verification-condition generation: 'symbolic' (default, the legacy "
-      ++ "symbolic evaluator), 'wp' (the WP phase, the SSA phase and dead-definition "
-      ++ "elimination), or 'symexec[:MODE]' (symbolic execution by the path explorer, in place "
-      ++ "of the legacy evaluator). MODE says when to merge the two branches of an if where they "
-      ++ "meet: 'merged' (the default: merge at every join), 'per-path' (no merging, up to "
+      ++ "symbolic evaluator), 'wp' (the WP phase, the SSA phase, guard forwarding, the "
+      ++ "inlining of single-use definitions and dead-definition elimination), 'usp' or 'uwp' "
+      ++ "(passification of each procedure's control-flow graph, then strongest postconditions "
+      ++ "or weakest preconditions; these accept CFG bodies, and are not yet proved sound), or "
+      ++ "'symexec[:MODE]' (symbolic execution by the path explorer, in place of the legacy "
+      ++ "evaluator). MODE says when to merge the two branches of an if where they meet: "
+      ++ "'merged' (the default: merge at every join), 'per-path' (no merging, up to "
       ++ "10,000 paths), or 'merge-above:N' (merge whenever more than N paths would exist; a "
       ++ "join whose branches cannot be merged keeps them apart, so N is not a hard bound). "
       ++ "In every mode, if a procedure cannot be fully explored (for example more than 10,000 "
       ++ "paths, a path that stopped, or a loop in a CFG body), the run stops with an error "
       ++ "naming the procedure and the reason, and no results are reported. Given more than "
       ++ "once, the last --vcgen counts.",
-    takesArg := .arg "symbolic|wp|symexec[:per-path|merged|merge-above:N]" },
+    takesArg := .arg "symbolic|wp|usp|uwp|symexec[:per-path|merged|merge-above:N]" },
   { name := "parallel",
     help := "Number of parallel solver workers (default: 1, sequential).",
     takesArg := .arg "N" },
@@ -194,6 +218,8 @@ def parseVCGenFlag (value : Option String) (base : VerifyOptions) :
   | none => .ok (base.vcgen, base.symExec)
   | some "symbolic" => .ok (.symbolic, none)
   | some "wp" => .ok (.wp, none)
+  | some "usp" => .ok (.usp, none)
+  | some "uwp" => .ok (.uwp, none)
   | some "symexec" => .ok (.symbolic, some .default)
   | some v =>
     match v.dropPrefix? "symexec:" with
@@ -201,8 +227,17 @@ def parseVCGenFlag (value : Option String) (base : VerifyOptions) :
       | some mode => .ok (.symbolic, some mode)
       | none => .error s!"Invalid vcgen: '{v}'. The merge mode after 'symexec:' must be \
         'per-path', 'merged' or 'merge-above:N' (N ≥ 1)."
-    | none => .error s!"Invalid vcgen: '{v}'. Must be 'symbolic', 'wp' or \
+    | none => .error s!"Invalid vcgen: '{v}'. Must be 'symbolic', 'wp', 'usp', 'uwp' or \
       'symexec[:per-path|merged|merge-above:N]'."
+
+/-- The value of `--cvc5-retry-timeout`: `base` when the flag is absent, else its value in
+    seconds, or an error message when that value is not a natural number. -/
+def parseCvc5RetryTimeout (value : Option String) (base : Nat) : Except String Nat :=
+  match value with
+  | none => .ok base
+  | some s => match s.toNat? with
+    | some n => .ok n
+    | none => .error s!"Invalid cvc5 retry timeout: '{s}'"
 
 /-- Build a VerifyOptions from parsed CLI flags, starting from a base config.
     Fields not present in the flags keep their base values.
@@ -221,6 +256,10 @@ def parseVerifyOptions (pflags : ParsedFlags)
     | .some s => match s.toNat? with
       | .some n => pure n
       | .none => exitFailure s!"Invalid solver timeout: '{s}'"
+  let cvc5RetryTimeout ← match parseCvc5RetryTimeout (pflags.getString "cvc5-retry-timeout")
+      base.cvc5RetryTimeout with
+    | .ok n => pure n
+    | .error msg => exitFailure msg
   let noSolve := pflags.getBool "no-solve"
   let removeIrrelevantAxioms ← match pflags.getString "remove-irrelevant-axioms" with
     | .none => pure base.removeIrrelevantAxioms
@@ -296,7 +335,51 @@ def parseVerifyOptions (pflags : ParsedFlags)
         exitFailure "--keep-all-files must be a non-empty directory."
       else
         pure (some s!"{dir}/{keepAllFilesBaseName inputFile}")
+  -- `--lean-directory <dir>`: each validity check in scope is also written as a Lean theorem
+  -- file. What became of each check is appended to `<dir>/export.log`, one line per check; a
+  -- file that cannot be written is reported on stderr as well, and so is a line that cannot be
+  -- appended to the log.
+  let scope? ← (pflags.getString "lean-scope").mapM fun s =>
+    match Core.LeanExport.Scope.ofString? s with
+    | some scope => pure scope
+    | none => exitFailure s!"Invalid lean-scope: '{s}'. Must be {Core.LeanExport.Scope.options}."
+  let leanExport ← match pflags.getString "lean-directory", base.leanExport with
+    -- The flags replace an export the preset sets.
+    | some dir, _ =>
+      if dir.isEmpty then
+        exitFailure "--lean-directory must be a non-empty directory."
+      -- The workers of a run report concurrently; the lock keeps their lines apart.
+      let lock ← Std.Mutex.new ()
+      let observe (event : Core.LeanExport.Event) : IO Unit := do
+        let outcome := match event.stage, event.file with
+          | .kept, some file => s!"kept existing {file}"
+          | _, some file => s!"wrote {file}"
+          | stage, none => s!"no file ({stage}): {event.diagnostic}"
+        -- One line per check, whatever its label and diagnostic contain.
+        let line := s!"{event.label}: {outcome}".map fun c =>
+          if c == '\n' || c == '\r' then ' ' else c
+        let appended ← lock.atomically do
+          try
+            IO.FS.createDirAll dir
+            IO.FS.withFile (System.FilePath.mk dir / "export.log") .append fun h => do
+              -- Runs that share the directory append to one log: the file lock keeps their
+              -- lines apart, and the flush makes a failed write an error here.
+              try h.lock catch _ => pure ()
+              h.putStrLn line
+              h.flush
+            pure true
+          catch _ => pure false
+        if event.stage == .writeFailure || !appended then
+          IO.eprintln
+            s!"Lean export: {line}{if appended then "" else " (not appended to export.log)"}"
+      pure (some { directory := dir, scope := scope?.getD .undecided, observe })
+    | none, some preset => pure (some { preset with scope := scope?.getD preset.scope })
+    | none, none =>
+      if scope?.isSome then
+        exitFailure "--lean-scope requires --lean-directory to specify where Lean files are stored."
+      pure none
   let options := { base with
+    leanExport,
     verbose := if pflags.getBool "verbose" then .normal
               else if pflags.getBool "quiet" then .quiet
               else base.verbose,
@@ -305,6 +388,10 @@ def parseVerifyOptions (pflags : ParsedFlags)
     checkMode, checkLevel,
     stopOnFirstError := pflags.getBool "stop-on-first-error" || base.stopOnFirstError,
     useArrayTheory := pflags.getBool "use-array-theory" || base.useArrayTheory,
+    cvc5FullSaturateQuant := pflags.getBool "cvc5-full-saturate-quant" || base.cvc5FullSaturateQuant,
+    cvc5RetryFullSaturateQuant :=
+      pflags.getBool "cvc5-retry-full-saturate-quant" || base.cvc5RetryFullSaturateQuant,
+    cvc5RetryTimeout,
     removeIrrelevantAxioms,
     removeIrrelevantDatatypes :=
       pflags.getBool "remove-irrelevant-datatypes"

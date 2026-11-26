@@ -169,6 +169,14 @@ private def earlyG := graph "E" [("E", ["A", "B"]), ("A", []), ("B", ["J"]), ("J
 #guard ipdomList earlyG == [("E", none), ("A", none), ("B", some "J"), ("J", none)]
 #guard postIdomsAgree earlyG
 
+/-- `A` jumps to `$__exit`, which is no block (the type checker refuses this; the analysis
+    does not rely on it): the end node gets another label, so `A` reaches no `finish` and the
+    fork at `E` reaches one only through `B`. -/
+private def danglingG := graph "E" [("E", ["A", "B"]), ("A", ["$__exit"]), ("B", [])]
+/-- info: [("E", some "B"), ("B", none)] -/
+#guard_msgs in
+#eval ipdomList danglingG
+
 /-- A loop `H ⇄ L` with exit `X`. -/
 private def loopG := graph "E" [("E", ["H"]), ("H", ["L", "X"]), ("L", ["H"]), ("X", [])]
 #guard ipdomList loopG == [("E", some "H"), ("H", some "X"), ("L", some "H"), ("X", none)]
@@ -214,7 +222,10 @@ info: [pos] under [int.gt($__symx_0, 0)]  check: true
 -/
 #guard_msgs in
 #eval obls diamond
-/-- info: [pos] under []  check: int.gt(if int.gt($__symx_0, 0) then 1 else 2, 0) -/
+/--
+info: [pos] under [$__joinr_0 == (if int.gt($__symx_0, 0) then 1 else 2)]  check:
+  int.gt($__joinr_0, 0)
+-/
 #guard_msgs (whitespace := lax) in
 #eval obls diamond .always
 #guard (run diamond).map (·.completeness) == some .complete
@@ -247,8 +258,7 @@ cfg entry {
 #guard_msgs in
 #eval summary nestedDiamond (.pathsAbove 2)
 /--
-info: [pos] under []  check: int.gt(if int.gt($__symx_0, 0) then if int.gt($__symx_0, 5) then 1
-  else 2 else 3, 0)
+info: [pos] under [$__joinr_0 == (if int.gt($__symx_0, 5) then 1 else 2), $__joinr_1 == (if int.gt($__symx_0, 0) then $__joinr_0 else 3)]  check: int.gt($__joinr_1, 0)
 -/
 #guard_msgs (whitespace := lax) in
 #eval obls nestedDiamond .always
@@ -274,8 +284,7 @@ cfg entry {
 #guard_msgs in
 #eval summary sharedJoin .always
 /--
-info: [nonneg] under []  check: int.ge(if int.gt($__symx_0, 0) then if int.gt($__symx_0, 5) then 1
-  else 0 else 0, 0)
+info: [nonneg] under [$__joinr_0 == (if int.gt($__symx_0, 5) then 1 else 0), $__joinr_1 == (if int.gt($__symx_0, 0) then $__joinr_0 else 0)]  check: int.ge($__joinr_1, 0)
 -/
 #guard_msgs (whitespace := lax) in
 #eval obls sharedJoin .always
@@ -310,7 +319,7 @@ cfg entry {
 #eval summary earlyFinish .always
 /--
 info: [two] under [if int.gt($__symx_0, 0) then false else true]  check: true
-[post] under []  check: int.gt(if int.gt($__symx_0, 0) then 1 else 2, 0)
+[post] under [$__joinr_0 == (if int.gt($__symx_0, 0) then 1 else 2)]  check: int.gt($__joinr_0, 0)
 -/
 #guard_msgs (whitespace := lax) in
 #eval obls earlyFinish .always
@@ -353,9 +362,44 @@ cfg entry {
 /-- info: some { finished := 1, stopped := 0, obligations := 1, merges := 1, unreached := 0 } -/
 #guard_msgs in
 #eval summary branchLocal .always
-/-- info: [pos] under []  check: int.gt(if int.gt($__symx_0, 0) then 5 else 2, 0) -/
+-- `r` is named by its declared type; nothing is left unnamed.
+#guard ((run branchLocal .always).map (·.joinValuesUnnamed)) == some 0
+/--
+info: [pos] under [$__joinr_0 == (if int.gt($__symx_0, 0) then 5 else 2)]  check:
+  int.gt($__joinr_0, 0)
+-/
 #guard_msgs (whitespace := lax) in
 #eval obls branchLocal .always
+
+-- One local declared in two blocks, `d1` and `d2`, neither of which dominates the other. `d1`
+-- dominates `j`, so `t` is still in scope at `j` and the merge there keeps it, though `d2` does
+-- not dominate `j`. Under `.always` (merged) the run finishes and `t`'s value reaches the `assert`.
+private def twoDecls := procOf <|
+#strata
+program Core;
+procedure P(x : int, out r : int)
+cfg entry {
+  entry: { branch (int.gt(x, 0)) goto d1 else goto d2; }
+  d1: { var t : int := 1; branch (int.gt(x, 5)) goto a else goto b; }
+  d2: { var t : int := 1; r := 0; return; }
+  a: { r := 1; goto j; }
+  b: { r := 2; goto j; }
+  j: { assert [tpos]: int.gt(t, 0); return; }
+};
+#end
+
+/-- info: some { finished := 3, stopped := 0, obligations := 2, merges := 0, unreached := 0 } -/
+#guard_msgs in
+#eval summary twoDecls
+/-- info: some { finished := 1, stopped := 0, obligations := 1, merges := 2, unreached := 0 } -/
+#guard_msgs in
+#eval summary twoDecls .always
+/--
+info: [tpos] under [int.gt($__symx_0, 0), $__joinr_0 == (if int.gt($__symx_0, 5) then 1 else 2)] 
+  check: true
+-/
+#guard_msgs (whitespace := lax) in
+#eval obls twoDecls .always
 
 /-! ## A loop runs out of budget -/
 
@@ -458,7 +502,51 @@ private def diamondChain (k : Nat) : Option Procedure :=
   some { header := { name := id "P", typeArgs := [], inputs := [(id "x", .int)],
                      outputs := [(id "r", .int)] }
          spec := { preconditions := [], postconditions := [] }
-         body := .cfg { entry := "e0", blocks := blocks ++ [(s!"e{k}", blk [] (.finish #[]))] } }
+         body := .cfg { entry := "e0", blocks := blocks ++ [(s!"e{k}", blk [] (.finish #[]))] }
+             false }
+
+/-- A body whose only block jumps to `$__symexec_exit`, which is no block (the type checker
+    refuses this). The explorer wraps a CFG body in a new entry and exit block whose labels are
+    neither labels nor jump targets of the body, so the jump is not taken as one to the
+    wrapper's exit: the path stops instead of finishing. -/
+private def danglingExit : Option Procedure :=
+  some { header := { name := ⟨"P", ()⟩, typeArgs := [], inputs := [], outputs := [] }
+         spec := { preconditions := [], postconditions := [] }
+         body := .cfg { entry := "s",
+                        blocks := [("s", { cmds := [], transfer := .goto "$__symexec_exit" })] }
+                            false }
+
+/-- info: some { finished := 0, stopped := 1, obligations := 0, merges := 0, unreached := 0 } -/
+#guard_msgs in
+#eval summary danglingExit
+
+/-- A body whose entry label, `$__symexec_exit`, is no block. The wrapper's entry jumps to the
+    body's entry, so the wrapper's labels avoid that label too: the jump is not taken as one to
+    the wrapper's exit, and the path stops instead of finishing without running the body. -/
+private def danglingEntry : Option Procedure :=
+  some { header := { name := ⟨"P", ()⟩, typeArgs := [], inputs := [], outputs := [] }
+         spec := { preconditions := [], postconditions := [] }
+         body := .cfg { entry := "$__symexec_exit",
+                        blocks := [("s", { cmds := [], transfer := .finish #[] })] } false }
+
+/-- info: some { finished := 0, stopped := 1, obligations := 0, merges := 0, unreached := 0 } -/
+#guard_msgs in
+#eval summary danglingEntry
+
+/-- Like `danglingEntry`, with the entry label `$__symexec_entry`: the wrapper's own entry does
+    not take that label, so it does not jump to itself (which would run until the step budget is
+    spent); the path stops at the missing block. -/
+private def danglingSelfEntry : Option Procedure :=
+  some { header := { name := ⟨"P", ()⟩, typeArgs := [], inputs := [], outputs := [] }
+         spec := { preconditions := [], postconditions := [] }
+         body := .cfg { entry := "$__symexec_entry",
+                        blocks := [("s", { cmds := [], transfer := .finish #[] })] } false }
+
+/--
+info: some (Core.SymExec.Completeness.notAnalyzed ["a path stopped: CFG: missing block label"])
+-/
+#guard_msgs in
+#eval (run danglingSelfEntry).map (·.completeness)
 
 -- Merging at each of 200 joins in a row: one path, complete.
 /-- info: some (1, 200, Core.SymExec.Completeness.complete) -/
@@ -466,7 +554,7 @@ private def diamondChain (k : Nat) : Option Procedure :=
 #eval (run (diamondChain 200) .always (fuel := 10000)).map fun r =>
   (r.finished, r.merges, r.completeness)
 
-/-! ## Ending paths at failed checks (`ExploreCfg.endOnFailedChecks`) -/
+/-! ## Failed checks and infeasible paths -/
 
 -- Block `c` is reached only past a failed assert.
 private def failThenCover := procOf <|
@@ -479,14 +567,27 @@ cfg entry {
 };
 #end
 
--- By default the path continues past the failed assert, and the cover gets an obligation.
+-- The path continues past the failed assert, and the cover gets an obligation.
 #guard ((run failThenCover).map fun r =>
   (r.obligations.map (·.label), r.unreached.map (·.label))) == some (["f", "cv"], [])
--- Ending the path at the failed assert, the cover gets no obligation, and is not reported as
--- unreached either, as in a structured body.
-#guard ((run failThenCover (cfg := { endOnFailedChecks := true })).map fun r =>
-  (r.obligations.map (·.label), r.unreached.map (·.label), r.completeness)) ==
-  some (["f"], [], .complete)
+
+-- Block `c` is reached only past an infeasible assume.
+private def deadThenCover := procOf <|
+#strata
+program Core;
+procedure P(x : int, out r : int)
+cfg entry {
+  entry: { assume [no]: false; goto c; }
+  c: { cover [cv]: int.gt(x, 0); r := 1; return; }
+};
+#end
+
+-- The path ends at the assume, so the cover gets no obligation; the run is complete, and the
+-- cover is left for `Result.addUnreached` to report.
+#guard ((run deadThenCover).map fun r =>
+  (r.obligations.map (·.label), r.countStatus (· matches .infeasible _), r.completeness)) ==
+  some ([], 1, .complete)
+#guard ((run deadThenCover).map fun r => r.unreached.map (·.label)) == some ["cv"]
 
 /-! ## Replaying counterexamples on CFG paths -/
 
@@ -551,10 +652,10 @@ cfg entry {
 #guard_msgs in
 #eval verifyCFG pricePgm (.pathsAbove 2)
 
--- Without `--vcgen symexec`, the verifier refuses a CFG body (`assertNoCFGBodies`).
+-- Without `--vcgen symexec`, the legacy symbolic evaluator cannot verify a CFG body, and the
+-- verifier refuses it.
 /--
-info: error: ❌ Expected every procedure body to be structured, but found procedure Price with a CFG
-  body.
+info: error: ❌ Expected every procedure body to be structured, but found procedure Price with a CFG body. To verify it, pass --vcgen symexec (for an acyclic one) or --vcgen usp (or uwp).
 -/
 #guard_msgs (whitespace := lax) in
 #eval do
@@ -565,10 +666,10 @@ info: error: ❌ Expected every procedure body to be structured, but found proce
     IO.println "verified"
   catch e => IO.println s!"error: {withoutRange (toString e)}"
 
--- A loop in a CFG body is refused by `verify --vcgen symexec`.
+-- A loop in a CFG body is cut at its header (`cfgLoopElim`), using the header's invariant.
 /--
-info: "error: ❌ Symbolic execution error.\nsymExec: procedure 'P': its CFG body has a loop (through
-  blocks [loop, body]), which --vcgen symexec does not analyze"
+info: "cfgLoopElimAssert_entry_loop_0: ✅ pass\ncfgLoopElimAssert_maintain_loop_body_0:
+  ✅ pass\neq: ✅ pass"
 -/
 #guard_msgs (whitespace := lax) in
 #eval verifyCFG <|
@@ -578,18 +679,18 @@ procedure P(n : int, out y : int)
 spec { requires [nneg]: int.ge(n, 0); ensures [eq]: y == n; }
 cfg entry {
   entry: { y := 0; goto loop; }
+  @[loopInvariant = (int.le(y, n))]
   loop: { branch (int.lt(y, n)) goto body else goto done; }
   body: { y := int.add(y, 1); goto loop; }
   done: { return; }
 };
 #end
 
--- A call in a block on a cycle: type checking runs first and accepts the call, call elimination
--- puts its `init`s in that block without checking them again, and `--vcgen symexec` rejects the
--- loop.
+-- A call in a block on a cycle: the loop is cut before call elimination, so the call's `init`s
+-- are in an acyclic body, and the invariant gives the callee's precondition.
 /--
-info: "error: ❌ Symbolic execution error.\nsymExec: procedure 'P': its CFG body has a loop (through
-  blocks [loop, body]), which --vcgen symexec does not analyze"
+info: "cfgLoopElimAssert_entry_loop_0: ✅ pass\ncallElimAssert_inc_pre_2:
+  ✅ pass\ncfgLoopElimAssert_maintain_loop_body_0: ✅ pass"
 -/
 #guard_msgs (whitespace := lax) in
 #eval verifyCFG <|
@@ -601,6 +702,7 @@ procedure P(n : int, out y : int)
 spec { requires [nneg]: int.ge(n, 0); }
 cfg entry {
   entry: { y := 0; goto loop; }
+  @[loopInvariant = (int.ge(y, 0))]
   loop: { branch (int.lt(y, n)) goto body else goto done; }
   body: { call Inc(y, out y); goto loop; }
   done: { return; }
@@ -858,8 +960,9 @@ caller_post: ✅ pass
 
 /-! ## Where the branches of a fork first meet
 
-In a CFG with no cycle, a fork joins at the first block both of its successors reach, or at the
-forking block's immediate post-dominator if no single block is first; a join never lies outside
+In a CFG with no cycle, a fork joins at the block of those both its successors reach that has no
+predecessor among them (a path may bypass it), or at the forking block's immediate
+post-dominator if there is no single such block; a join never lies outside
 the path's innermost open join; a path has left the branches once its block cannot reach the
 join's block. In a CFG with a cycle, a fork joins at the immediate post-dominator. On a body
 lowered from structured statements (`Core.stmtsToCFG`), the CFG run merges wherever the
@@ -927,8 +1030,8 @@ private def passedAt (g : Core.DetCFG) (j l : String) : Bool :=
 /-- `p` with its structured body lowered to a CFG (`Core.stmtsToCFG`). -/
 private def lowered (p : Option Procedure) : Option Procedure :=
   p.bind fun p => match p.body with
-    | .structured ss => (Core.stmtsToCFG ss).map fun g => { p with body := .cfg g }
-    | .cfg _ => none
+    | .structured ss _ => (Core.stmtsToCFG ss).map fun g => { p with body := .cfg g false }
+    | .cfg _ _ | .abstract => none
 
 /-- Paths finished and merges of `run p` under `MergePolicy.always`. -/
 private def counts (p : Option Procedure) : Option (Nat × Nat) :=

@@ -415,10 +415,11 @@ procedure aliasKeepsItsSpelling() opaque {
 };
 #end
 
-/-! ### Equally precise arguments: the first one decides
+/-! ### Equally precise arguments complete each other
 
-`TotalMap int ?` and `TotalMap ? int` are each more precise in one component, so neither is
-preferred and the first argument's type is inferred. The one place argument order still decides. -/
+`TotalMap int ?` and `TotalMap ? int` are each more precise in one component. The second argument
+is handed the first's instantiation as its slot, which a map's type arguments must equal, so its
+hole takes the missing component: `TotalMap int int`, in either order. -/
 
 #eval testLaurelResolution <|
 #strata
@@ -426,49 +427,35 @@ program Laurel;
 procedure mkMap<K,V>(k: K, v: V) returns (m: TotalMap K V) opaque;
 procedure pick<T>(a: T, b: T) returns (r: T) opaque;
 procedure equallyPrecise() opaque {
-  var y: bool := pick(mkMap(1, <?>), mkMap(<?>, 1))
-//               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ error: expected 'bool', got 'TotalMap int Unknown'
+  var y: bool := pick(mkMap(1, <?>), mkMap(<?>, 1));
+//               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ error: expected 'bool', got 'TotalMap int int'
+  var z: bool := pick(mkMap(<?>, 1), mkMap(1, <?>))
+//               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ error: expected 'bool', got 'TotalMap int int'
 };
 #end
 
-/-! ### A gradual type registered by a frontend does not become the inferred type
+/-! ### The caller's own type variable is one fixed type
 
-The two sections below are the only ones that need `gradualTypes`; a Laurel program cannot register a
-type itself. `Any` is consistent with everything, so inferring it would leave the `Dog`/`Cat`
-disagreement unreported. -/
+Inside `w<U>`, `U` is not a wildcard: it disagrees with `int`, and with a different type variable
+of the same caller. A callee's parameter spelled `U` is still the callee's to instantiate. -/
 
-#eval testLaurelResolution (gradualTypes := ({} : Std.HashSet String).insert "Any") <|
+#eval testLaurelResolution <|
 #strata
 program Laurel;
-composite Any { }
-composite Animal { }
-composite Dog extends Animal { }
-composite Cat extends Animal { }
 procedure both3<T>(a: T, b: T, c: T) opaque;
-procedure gradualHidesNothing() opaque {
-  var g: Any := new Any;
-  var d: Dog := new Dog;
-  var k: Cat := new Cat;
-  both3(g, d, k)
-//^^^^^^^^^^^^^^ error: cannot infer type argument 'T' of 'both3': 'Dog' and 'Cat' disagree
+procedure idp<U>(x: U) returns (r: U) opaque;
+procedure againstAConcreteType<U>(u: U) opaque {
+  both3(u, 1, true)
+//^^^^^^^^^^^^^^^^^ error: cannot infer type argument 'T' of 'both3': 'U' and 'int' disagree
 };
-#end
-
-/-! ### The same when the registered type is reached through an alias
-
-`G` names `Any`, so this is the case above with the gradual type one step away. The `int`/`bool`
-disagreement must still be the one reported. -/
-
-#eval testLaurelResolution (gradualTypes := ({} : Std.HashSet String).insert "Any") <|
-#strata
-program Laurel;
-composite Any { }
-composite Box<T> { var v: T }
-type G = Any
-procedure both3B<T>(a: Box<T>, b: Box<T>, c: Box<T>) opaque;
-procedure gradualBehindAnAlias(bg: Box<G>, bi: Box<int>, bb: Box<bool>) opaque {
-  both3B(bg, bi, bb)
-//^^^^^^^^^^^^^^^^^^ error: cannot infer type argument 'T' of 'both3B': 'int' and 'bool' disagree
+procedure againstAnotherTypeVariable<U, V>(u: U, v: V) opaque {
+  both3(u, u, v)
+//^^^^^^^^^^^^^^ error: cannot infer type argument 'T' of 'both3': 'U' and 'V' disagree
+};
+procedure againstItself<U>(u: U, w: U) opaque {
+  both3(u, w, u);
+  var i: int := idp(1);
+  var j: U := idp(u)
 };
 #end
 
@@ -546,12 +533,12 @@ procedure checkedGenericArguments(c: bool, d: Dog, k: Cat) opaque {
 };
 #end
 
-/-! ### A nested call gets its slot from a later argument too
+/-! ### A nested call is solved by a later argument too
 
-From the declared result of a later call, `getS()`, which is known before that call is resolved,
-and, inside an `if` or a block, from a later argument these wait for, `s`. A declared result in
-the callee's type parameters says nothing, also where they are the caller's own: `rec(true)` is a
-`Set<bool>`, not the `Set<T>` it declares. -/
+From the result of a later call, `getS()`, and, inside an `if` or a block, from a later argument,
+`s`, when the call is solved. A declared result in the callee's type parameters says nothing, also
+where they are the caller's own: `rec(true)` is a `Set<bool>`, so `setEmpty()` beside it is one
+too, not a `Set<T>` of the caller's. -/
 
 #eval testLaurelResolution <|
 #strata
@@ -566,7 +553,6 @@ procedure laterArguments(c: bool, s: Set<int>) opaque {
 };
 procedure rec<T>(x: T) returns (r: Set<T>) opaque {
   same2(setEmpty(), rec(true));
-//      ^^^^^^^^^^ error: cannot infer type argument 'T' of 'setEmpty': annotate the variable or output it is assigned to with a concrete type
   r := setEmpty()
 };
 #end

@@ -27,9 +27,7 @@ public section
     `moreFns`. A supplied factory is checked first; the built-in one is not. Each function of
     `moreFns` is then checked against the factory and the functions before it. The type names in
     scope are collected once into a set, which grows with the signatures of the added
-    functions. It rejects a lemma whose name contains `#` and whose formula mentions a type
-    variable, since the opaque type that later replaces the variable is named after the
-    lemma. -/
+    functions. -/
 def typeCheck (options : VerifyOptions) (program : Program)
     (factory : Option (Lambda.Factory CoreLParams) := none)
     (moreFns : Lambda.Factory CoreLParams := Lambda.Factory.default) :
@@ -47,13 +45,13 @@ def typeCheck (options : VerifyOptions) (program : Program)
   | .ok T =>
     let (C, S) ← Factory.checkThenAddIn S C T moreFns.toArray
     let (program, _) ← Program.typeCheckIn S C T program
-    GenOpaqueTypeParams.checkClosedLemmaNames program
     if options.verbose >= .normal then dbg_trace f!"[Strata.Core] Type checking succeeded.\n"
     return program
 
 /-- Type-checking pipeline phase: runs `Core.typeCheck` on the program against
     `factory` (`none`: the built-in functions) and the extra functions `moreFns`. Every call of
-    its output is well formed, and every expression is annotated. -/
+    its output is well formed and every expression is annotated. Its output records the prefixes
+    of its internal names and of the internal names of the functions it is checked against. -/
 def typeCheckPipelinePhase
     (options : VerifyOptions := VerifyOptions.default)
     (factory : Option (@Lambda.Factory CoreLParams) := none)
@@ -69,10 +67,16 @@ def typeCheckPipelinePhase
                          .noLoopMeasures, .staticSingleAssignment, .noBetaRedexes,
                          .noPrecondsFromFuncs, .noNondetGuards, .noProcedureContracts,
                          .noPolymorphicProcedures,
-                         .noPolymorphicFunctions, .noInits])
+                         .noPolymorphicFunctions, .noInits, .noCFGCycles])
     fun prog => do
       match Core.typeCheck options prog factory moreFns with
-      | .ok prog' => return (true, prog')
+      | .ok prog' =>
+        -- The input's recorded prefixes are kept.
+        let fns := (factory.getD Core.Factory).toArray.toList ++ moreFns.toArray.toList
+        let fnPrefixes := (fns.map (·.name.name)).filter Strata.Name.isInternal
+          |>.map Strata.Name.internalPrefixOf
+        return (true, { prog' with usedIdentPrefixes := prog.usedIdentPrefixes }
+          |>.withCollectedIdentPrefixes |>.addIdentPrefixes fnPrefixes)
       | .error err => throw { err with message := s!"❌ Type checking error.\n{err.message}" }
 
 end -- public section

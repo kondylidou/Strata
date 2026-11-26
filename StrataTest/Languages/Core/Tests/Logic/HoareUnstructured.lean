@@ -100,7 +100,7 @@ private def eraseLocsCFG (cfg : Core.DetCFG) : Core.DetCFG :=
 private def eraseProc (proc : Core.Procedure) : Core.Procedure :=
   let q := Core.Procedure.mapExprs Core.eraseLocs proc
   match q.body with
-  | .cfg c => { q with body := .cfg (eraseLocsCFG c) }
+  | .cfg c _ => { q with body := .cfg (eraseLocsCFG c) false }
   | _ => q
 
 /-- Expression source locations are normalized to `Core.valueLoc` so the tests'
@@ -116,7 +116,8 @@ private def cstToAST (p : Program) : Core.Program :=
 
 private def sumToNAST := cstToAST sumToNPgm
 private def sumToNProc : Core.Procedure := (sumToNAST.findProcByString? "sum_to_n").get!
-private def sumToNCFG : Core.DetCFG := match sumToNProc.body with | .cfg cfg => cfg | _ => default
+private def sumToNCFG : Core.DetCFG :=
+  match sumToNProc.body with | .cfg cfg false => cfg | _ => default
 
 /-! ## Identifiers and expression shapes -/
 
@@ -396,7 +397,7 @@ private theorem set_pre {π : String → Option Core.Procedure} {fac : Core.Expr
     {e : Core.Expression.Expr} {md : MetaData Core.Expression} {emitted}
     (h : Core.EvalCommandE π fac σ (.cmd (.set x (.det e) md)) σ' emitted) :
     (σ x).isSome = true := by
-  rcases h with ⟨hbase⟩
+  have hbase := Imperative.evalCmdExtE_cmd_iff.mp h
   cases hbase with
   | eval_set heval hupdate _ _ =>
     cases hupdate with
@@ -408,7 +409,7 @@ private theorem init_inv {π : String → Option Core.Procedure} {fac : Core.Exp
     {ty : Lambda.LTy} {md : MetaData Core.Expression} {emitted}
     (h : Core.EvalCommandE π fac σ (.cmd (.init x ty .nondet md)) σ' emitted) :
     (∀ y, x ≠ y → σ' y = σ y) ∧ emitted = [] := by
-  rcases h with ⟨hbase⟩
+  have hbase := Imperative.evalCmdExtE_cmd_iff.mp h
   cases hbase with
   | eval_init_unconstrained hinit _ _ =>
     cases hinit with
@@ -581,7 +582,7 @@ private theorem run_preserves {π : String → Option Core.Procedure} {F : Core.
 private def testParams : Core.Logic.InitEnvWFParams := ⟨[], [], [], fun _ => true⟩
 
 /-- The translated `sum_to_n` has a CFG body, namely `sumToNCFG`. -/
-private theorem sumToN_body : sumToNProc.body = .cfg sumToNCFG := by native_decide
+private theorem sumToN_body : sumToNProc.body = .cfg sumToNCFG false := by native_decide
 
 /-- The procedure named `sum_to_n` resolves to `sumToNProc` in the translated AST. -/
 private theorem sumToN_find : sumToNAST.findProcByString? "sum_to_n" = some sumToNProc := by
@@ -665,23 +666,31 @@ theorem sum_to_n_meets_contract :
   have hfactory : sumToNAST.factoryBeforeProcedure "sum_to_n" = Core.Factory :=
     Core.Program.factoryBeforeProcedure_eq_core_of_noFunctions (by native_decide)
   rw [Core.Logic.Hoare.Procedure.contractTriple, hfactory]
-  refine ⟨sumToNProc, sumToN_find, by native_decide, ?_⟩
+  refine ⟨sumToNProc, sumToN_find,
+    Core.Procedure.forall_instance_of_typeArgs_nil (by native_decide) ⟨by native_decide, ?_⟩⟩
   rw [sumToN_body]
-  intro ρEntry ρ₀ ρ' trace hpre hinit hterm
+  intro ρEntry ρ₀ hpre hinit
   obtain ⟨⟨hpre, _haxioms⟩, rfl⟩ := hpre
-  obtain ⟨hpreP, hfac, _hold, hinput⟩ := hpre
+  obtain ⟨hpreP, hfac, _hold, hinput, -⟩ := hpre
   obtain ⟨vn, hvn, invn⟩ := hinput nId Lambda.LMonoTy.int (by native_decide)
   obtain ⟨nv, hvi⟩ := Lambda.SemValue.exists_ofInt invn
   have htc : vn.tc = ρ₀.factory.model.tcInterp := hinit.storeWellDefined nId vn hvn
   rw [hvi, htc] at hvn
   have hnonneg : 0 ≤ nv := req_nonneg ρ₀ nv hfac hvn hpreP
+  refine ⟨fun cfg trace hrun => ?_, fun ρ' trace hterm _ => ?_⟩
+  · -- every finite execution emits nothing
+    have hrun : ReflTransTrace
+        (StepCFGE Core.Expression (Core.EvalCommandE sumToNAST.findProcByString?))
+        (.atBlock sumToNCFG sumToNCFG.entry ρ₀) trace cfg := hrun
+    rw [sumToN_cfg_eq] at hrun
+    obtain ⟨-, rfl⟩ := run_preserves hfac hnonneg (RunInv.atEntry ρ₀ rfl hvn) hrun
+    exact True.intro
   have hrun : ReflTransTrace (StepCFGE Core.Expression (Core.EvalCommandE sumToNAST.findProcByString?))
       (.atBlock sumToNCFG sumToNCFG.entry ρ₀) trace (.terminal ρ') := by
     rcases hterm with h | ⟨_, h⟩ <;> exact h
   rw [sumToN_cfg_eq] at hrun
   obtain ⟨hfinal, htrace⟩ := run_preserves hfac hnonneg (RunInv.atEntry ρ₀ rfl hvn) hrun
   subst htrace
-  refine ⟨True.intro, fun _ => ?_⟩
   obtain ⟨hfac', hpost⟩ := runInv_terminal hfinal
   obtain ⟨rv, hn', hr, hsum⟩ := hpost
   have hresultEntry : (ρ₀.store resultId).isSome :=
@@ -746,7 +755,7 @@ private def falseEnsPgm : Core.Program := cstToAST falseEnsPgmSrc
 private def falseEnsProc : Core.Procedure := (falseEnsPgm.findProcByString? "false_ens").get!
 /-- The `false_ens` CFG body, projected out of the translated procedure. -/
 private def falseEnsCFG : Core.DetCFG :=
-  match falseEnsProc.body with | .cfg cfg => cfg | _ => default
+  match falseEnsProc.body with | .cfg cfg false => cfg | _ => default
 
 /-! The hand-spelled command and CFG shapes used by the `false_ens` and `copy`
 semantic proofs carry metadata projected from the translated CFG. Equality with
@@ -757,7 +766,7 @@ private def falseEnsInitT : Core.Command :=
   .cmd (.init tId intLTy .nondet (cmdMdOf falseEnsCFG "entry" 0))
 
 /-- The translated `false_ens` body is the CFG `falseEnsCFG`. -/
-private theorem falseEns_body : falseEnsProc.body = .cfg falseEnsCFG := by native_decide
+private theorem falseEns_body : falseEnsProc.body = .cfg falseEnsCFG false := by native_decide
 /-- The translated `false_ens` entry block holds the single `var t : int`
     declaration and a `finish` transfer. -/
 private theorem falseEns_entry_lookup :
@@ -765,23 +774,28 @@ private theorem falseEns_entry_lookup :
       some { cmds := [falseEnsInitT],
              transfer := .finish (transferMdOf falseEnsCFG "entry") } := by native_decide
 
-/-- The entry environment for the `false_ens` run: the empty store over the runtime
-    factory of `model`. -/
+/-- The entry store for the `false_ens` run: the output `result` holds `0`, as the contract's
+    output typing asks, and nothing else is bound. -/
+private def σ0N (model : Lambda.Interp Core.Factory) : Core.CoreStore :=
+  fun i => if i = resultId then some (intV (boolFactory model) 0) else Imperative.emptyStore i
+
+/-- The entry environment for the `false_ens` run: `σ0N` over the runtime factory of
+    `model`. -/
 private def ρ0N (model : Lambda.Interp Core.Factory) : Imperative.Env Core.Expression :=
-  { store := Imperative.emptyStore,
+  { store := σ0N model,
     factory := boolFactory model }
 
 /-- The store after the body-local `var t : int := *` chooses `0`. -/
 private def σ2N (model : Lambda.Interp Core.Factory) : Core.CoreStore :=
   fun i => if i = tId then
       some (intV (boolFactory model) 0)
-    else Imperative.emptyStore i
+    else σ0N model i
 
-/-- Declaring `t := 0` from the empty store is a valid `InitState`. -/
+/-- Declaring `t := 0` from the entry store is a valid `InitState`. -/
 private theorem hinitN (model : Lambda.Interp Core.Factory) :
-    Imperative.InitState Core.Expression Imperative.emptyStore tId
+    Imperative.InitState Core.Expression (σ0N model) tId
       (intV (boolFactory model) 0) (σ2N model) :=
-  .init rfl (by simp [σ2N])
+  .init (by simp [σ0N, Imperative.emptyStore, tId, resultId]) (by simp [σ2N])
     (fun y hy => by
       have hne : y ≠ tId := fun h => hy h.symm
       simp [σ2N, hne])
@@ -791,7 +805,13 @@ private theorem hinitN (model : Lambda.Interp Core.Factory) :
 private theorem false_ens_initEnvWF (model : Lambda.Interp Core.Factory) :
     Core.Logic.CFGInitEnvWF testParams falseEnsCFG (ρ0N model) where
   toWellFormedSemanticEval := Core.coreFactory_WellFormedSemanticEval _ rfl
-  storeWellDefined := by intro x v h; simp [ρ0N, Imperative.emptyStore] at h
+  storeWellDefined := by
+    intro x v h
+    by_cases hx : x = resultId
+    · simp only [ρ0N, σ0N, hx, ite_true, Option.some.injEq] at h
+      subst h
+      rfl
+    · simp [ρ0N, σ0N, hx, Imperative.emptyStore] at h
   readWritesDefined := by
     intro n hn hnd
     have key : ∀ m ∈ (HasVarsImp.modifiedVars (P := Core.Expression) falseEnsCFG ++
@@ -799,10 +819,17 @@ private theorem false_ens_initEnvWF (model : Lambda.Interp Core.Factory) :
         HasVarsImp.readVars (P := Core.Expression) falseEnsCFG),
         m ∈ HasVarsImp.definedVars (P := Core.Expression) falseEnsCFG false := by native_decide
     exact absurd (key n hn) hnd
-  defsUndefined := by intro n _; simp [ρ0N, Imperative.emptyStore]
+  defsUndefined := by
+    intro n hn
+    rw [show HasVarsImp.definedVars (P := Core.Expression) falseEnsCFG false = [tId]
+      from by native_decide] at hn
+    simp only [List.mem_singleton] at hn
+    subst hn
+    simp [ρ0N, σ0N, Imperative.emptyStore, tId, resultId]
   definedVarsNotReserved := by intro n _ name _ p hp; simp [testParams] at hp
   reservedFresh := by intro n _ name _ p hp; simp [testParams] at hp
   factoryDeclared := by intro nm _; rfl
+  runtimeFactoryDeclared := by intro f _; rfl
   initTypesInhabited := by
     intro ty hty
     have hlist : Imperative.DetCFG.initTypes falseEnsCFG = [intLTy] := by native_decide
@@ -842,15 +869,24 @@ theorem false_ens_contract_refuted :
   obtain ⟨model⟩ := Core.factoryInterp_nonempty
   intro h
   rw [Core.Logic.Hoare.Procedure.contractTriple, hfactory] at h
-  obtain ⟨proc, hfind, _htyped, htriple⟩ := h
+  obtain ⟨proc, hfind, hinsts⟩ := h
   have hpe : proc = falseEnsProc := by
     have hf : falseEnsPgm.findProcByString? "false_ens" = some falseEnsProc := by native_decide
     exact Option.some.inj (hfind.symm.trans hf)
   subst hpe
-  have hbody : falseEnsProc.body = .cfg falseEnsCFG := falseEns_body
+  obtain ⟨_htyped, htriple⟩ := hinsts [] _
+    ((Core.Procedure.instantiateTypes_of_typeArgs_nil (by native_decide)).2 ⟨rfl, rfl⟩)
+  have hbody : falseEnsProc.body = .cfg falseEnsCFG false := falseEns_body
   rw [hbody] at htriple
+  have hout : Core.Logic.Hoare.Procedure.outputAsPredicate falseEnsProc (ρ0N model) := by
+    intro id ty hmem
+    rw [show falseEnsProc.header.outputs.toList = [(resultId, Lambda.LMonoTy.int)]
+      from by native_decide] at hmem
+    simp only [List.mem_singleton] at hmem
+    obtain ⟨rfl, rfl⟩ := hmem
+    exact ⟨intV (boolFactory model) 0, by simp [ρ0N, σ0N], rfl⟩
   have hpre : Core.Logic.Hoare.Procedure.contractPre Core.Factory falseEnsProc (ρ0N model) := by
-    refine ⟨?_, rfl, ?_, ?_⟩
+    refine ⟨?_, rfl, ?_, ?_, hout⟩
     · intro label check hmem
       rw [show falseEnsProc.spec.preconditions.toList = [] from by native_decide] at hmem
       simp at hmem
@@ -860,7 +896,8 @@ theorem false_ens_contract_refuted :
     · intro id ty hmem
       rw [show falseEnsProc.header.inputs.toList = [] from by native_decide] at hmem
       simp at hmem
-  obtain ⟨_, hpost⟩ := htriple (ρ0N model) (ρ0N model) { ρ0N model with store := σ2N model } []
+  obtain ⟨_, hpost⟩ := Strata.Logic.Hoare.TripleWith.run (htriple (ρ0N model)) (ρ0N model)
+    { ρ0N model with store := σ2N model } []
     ⟨⟨hpre, Core.Specification.axiomsBeforeProcedureDecl_of_noAxioms (by native_decide) _⟩, rfl⟩
     (false_ens_initEnvWF model) (Or.inl (falseEns_run model))
   have hreach : Trace.Reachable Core.Expression (Core.Logic.DenoteBasedInterp Core.Factory) [] :=
@@ -921,7 +958,7 @@ private def copyPgm : Core.Program := cstToAST copyPgmSrc
 private def copyProc : Core.Procedure := (copyPgm.findProcByString? "copy").get!
 /-- The `copy` CFG body, projected out of the translated procedure. -/
 private def copyCFG : Core.DetCFG :=
-  match copyProc.body with | .cfg cfg => cfg | _ => default
+  match copyProc.body with | .cfg cfg false => cfg | _ => default
 
 /-- The callee body command `result := x` (metadata projected from DDM). -/
 private def copySet : Core.Command :=
@@ -929,8 +966,12 @@ private def copySet : Core.Command :=
 
 /-- The DDM program resolves `copy` to `copyProc`. -/
 private theorem copy_find : copyPgm.findProcByString? "copy" = some copyProc := by native_decide
+/-- A call to `copy` without type arguments runs `copyProc`, which has no type parameters. -/
+private theorem copy_callee :
+    Imperative.Calls.typeInstantiatedCallee copyPgm.findProcByString? "copy" none = some copyProc :=
+  (Core.Procedure.typeInstantiatedCallee_of_typeArgs_nil copy_find (by native_decide)).2 ⟨rfl, rfl⟩
 /-- The translated `copy` procedure has CFG body `copyCFG`. -/
-private theorem copy_body : copyProc.body = .cfg copyCFG := by native_decide
+private theorem copy_body : copyProc.body = .cfg copyCFG false := by native_decide
 /-- The translated `copy` CFG's entry label is `"entry"`. -/
 private theorem copy_entry : copyCFG.entry = "entry" := by native_decide
 /-- The translated `copy` entry block contains the copy assignment and returns. -/
@@ -1034,15 +1075,24 @@ theorem copy_meets_contract :
   have hfactory : copyPgm.factoryBeforeProcedure "copy" = Core.Factory :=
     Core.Program.factoryBeforeProcedure_eq_core_of_noFunctions (by native_decide)
   rw [Core.Logic.Hoare.Procedure.contractTriple, hfactory]
-  refine ⟨copyProc, copy_find, by native_decide, ?_⟩
+  refine ⟨copyProc, copy_find,
+    Core.Procedure.forall_instance_of_typeArgs_nil (by native_decide) ⟨by native_decide, ?_⟩⟩
   rw [copy_body]
-  intro ρEntry ρ₀ ρ' trace hpre hinit hterm
+  intro ρEntry ρ₀ hpre hinit
   obtain ⟨⟨hpre, _haxioms⟩, rfl⟩ := hpre
-  obtain ⟨_hpreP, hfac, _hold, hinput⟩ := hpre
+  obtain ⟨_hpreP, hfac, _hold, hinput, -⟩ := hpre
   obtain ⟨vx, hvx, hvt⟩ := hinput xIdC Lambda.LMonoTy.int (by native_decide)
   obtain ⟨a, hvi⟩ := Lambda.SemValue.exists_ofInt hvt
   have htc : vx.tc = ρ₀.factory.model.tcInterp := hinit.storeWellDefined xIdC vx hvx
   rw [hvi, htc] at hvx
+  refine ⟨fun cfg trace hrun => ?_, fun ρ' trace hterm _ => ?_⟩
+  · -- every finite execution emits nothing
+    have hrun : ReflTransTrace
+        (StepCFGE Core.Expression (Core.EvalCommandE copyPgm.findProcByString?))
+        (.atBlock copyCFG copyCFG.entry ρ₀) trace cfg := hrun
+    rw [copy_entry] at hrun
+    obtain ⟨-, rfl⟩ := run_preserves_copy (CopyInv.atEntry ρ₀ rfl hvx) hrun
+    exact True.intro
   have hrun : ReflTransTrace (StepCFGE Core.Expression (Core.EvalCommandE copyPgm.findProcByString?))
       (.atBlock copyCFG copyCFG.entry ρ₀) trace (.terminal ρ') := by
     rcases hterm with h | ⟨_, h⟩ <;> exact h
@@ -1051,7 +1101,6 @@ theorem copy_meets_contract :
   subst htrace
   cases hfinal with
   | terminal _ hf' hx' hr' =>
-    refine ⟨True.intro, fun _ => ?_⟩
     have hxEntry : (ρ₀.store xIdC).isSome :=
       hinit.readWritesDefined xIdC (by native_decide) (by native_decide)
     have hrEntry : (ρ₀.store resultId).isSome :=
@@ -1152,10 +1201,11 @@ private theorem run_preserves_frame {π : String → Option Core.Procedure} {σ_
 
 /-- **Every `copy` body run respects the output frame `[result]`.** -/
 theorem copy_body_frame :
-    ∀ proc, copyPgm.findProcByString? "copy" = some proc →
+    ∀ proc,
+      Imperative.Calls.typeInstantiatedCallee copyPgm.findProcByString? "copy" none = some proc →
       Core.Logic.Hoare.Procedure.bodyFrame copyPgm.findProcByString? proc := by
   intro proc hlk
-  obtain rfl : proc = copyProc := Option.some.inj (hlk.symm.trans copy_find)
+  obtain rfl : proc = copyProc := Option.some.inj (hlk.symm.trans copy_callee)
   intro σ_entry fac σ_exit emitted hbody
   rw [copy_body] at hbody
   cases hbody with
@@ -1247,11 +1297,12 @@ private theorem run_preserves_typed {π : String → Option Core.Procedure}
 
 /-- Every `copy` body run binds `result` to a value of its declared type. -/
 private theorem copy_body_outputs_typed :
-    ∀ proc, copyPgm.findProcByString? "copy" = some proc →
+    ∀ proc,
+      Imperative.Calls.typeInstantiatedCallee copyPgm.findProcByString? "copy" none = some proc →
       Core.Logic.Hoare.Procedure.bodyOutputsTyped
         (copyPgm.factoryBeforeProcedure "copy") copyPgm.findProcByString? proc := by
   intro proc hlk
-  obtain rfl : proc = copyProc := Option.some.inj (hlk.symm.trans copy_find)
+  obtain rfl : proc = copyProc := Option.some.inj (hlk.symm.trans copy_callee)
   intro σ_entry fac σ_exit emitted _hfac hin hbody
   obtain ⟨vx, hvx, hvt⟩ := hin xIdC Lambda.LMonoTy.int (by native_decide)
   rw [copy_body] at hbody
@@ -1280,11 +1331,11 @@ private theorem copy_body_outputs_typed :
 private def copyCall : List (Imperative.CallArg Core.Expression) :=
   [.inArg (Lambda.LExpr.fvar Core.valueLoc aIdC intTy), .outArg zIdC]
 
-/-- Caller precondition: the runtime factory is over `Core.Factory`, `a` holds an
-    integer of it, and `z` is allocated. -/
+/-- Caller precondition: the runtime factory is over `Core.Factory`, and `a` and `z` hold
+    integers of it. -/
 private def CopyCallPre (ρ : Env Core.Expression) : Prop :=
   ρ.factory.factory = Core.Factory ∧ (∃ av, ρ.store aIdC = some (intV ρ.factory av)) ∧
-    (ρ.store zIdC).isSome
+    ∃ zv, ρ.store zIdC = some (intV ρ.factory zv)
 
 /-- Caller postcondition: after the call returns, `z == a` evaluates to `true`.
     The callee output `result`, which is written back into `z`, is an integer
@@ -1325,7 +1376,7 @@ private theorem copy_callentry_facts
     (ha : ρ₀.store aIdC = some (intV ρ₀.factory av))
     (h : Core.CallEntry ρ₀.factory ρ₀.store copyProc copyCall σAO) :
     σAO xIdC = some (intV ρ₀.factory av) ∧
-      (∃ vz, σAO resultId = some vz ∧ HasVal.value ρ₀.factory vz) ∧
+      (∃ vz, σAO resultId = some vz ∧ ρ₀.store zIdC = some vz ∧ HasVal.value ρ₀.factory vz) ∧
       Imperative.WellFormedStore σAO ρ₀.factory := by
   obtain ⟨inputVals, outOnlyVals, hEE, hRV, σA, σIO, hIA, hIO, hSnap⟩ := h
   rw [show Imperative.Calls.getInputExprs copyCall = [Lambda.LExpr.fvar Core.valueLoc aIdC intTy] from rfl]
@@ -1345,7 +1396,7 @@ private theorem copy_callentry_facts
     have hv1 := eval_fvar_inv ha he1
     subst hv1
     cases hRV with
-    | read_some _hz hvz hRV2 =>
+    | read_some hzv hvz hRV2 =>
       cases hRV2
       have hwfA : Imperative.WellFormedStore σA ρ₀.factory :=
         Imperative.initStates_preserves_wf hIA
@@ -1366,7 +1417,7 @@ private theorem copy_callentry_facts
           | init _ hix2 _ =>
             cases hiy with
             | init _ hiy2 hiyoth =>
-              refine ⟨?_, ⟨_, ?_, hvz⟩, hAOeq ▸ hwfIO⟩
+              refine ⟨?_, ⟨_, ?_, hzv, hvz⟩, hAOeq ▸ hwfIO⟩
               · rw [hAOeq, hiyoth xIdC (ident_ne (by decide)), hix2]
               · rw [hAOeq]; exact hiy2
 
@@ -1376,7 +1427,7 @@ private theorem copy_callentry_facts
     with an explicit `CFGInitEnvWF`. -/
 theorem copy_call_triple :
     Core.Logic.Hoare.Triple copyPgm.findProcByString? testParams CopyCallPre
-      [Core.Statement.call "copy" copyCall .empty] CopyCallPost
+      [Core.Statement.call "copy" none copyCall .empty] CopyCallPost
       (factory := copyPgm.factoryBeforeProcedure "copy") := by
   have hfactory : copyPgm.factoryBeforeProcedure "copy" = Core.Factory :=
     Core.Program.factoryBeforeProcedure_eq_core_of_noFunctions (by native_decide)
@@ -1386,12 +1437,13 @@ theorem copy_call_triple :
     (fun _ _ _ _ _ _ _ => Core.Specification.axiomsBeforeProcedureDecl_of_noAxioms (by native_decide) _) ?_
   · -- hentry
     intro ρ₀ proc σAO hpre hwf hlk hce
-    obtain rfl : proc = copyProc := Option.some.inj (hlk.symm.trans copy_find)
-    obtain ⟨hfac, ⟨av, ha⟩, _hz⟩ := hpre
-    obtain ⟨hAOx, ⟨vz, hAOr, hvzval⟩, hwfAO⟩ :=
+    obtain rfl : proc = copyProc := Option.some.inj (hlk.symm.trans copy_callee)
+    obtain ⟨hfac, ⟨av, ha⟩, ⟨zv, hz⟩⟩ := hpre
+    obtain ⟨hAOx, ⟨vz, hAOr, hzvz, hvzval⟩, hwfAO⟩ :=
       copy_callentry_facts ha hce
     rw [copy_body]
-    refine ⟨⟨?_, hfac.trans hfactory.symm, ?_, ?_⟩, ?_⟩
+    simp only [Imperative.Body.isOpaque, Bool.false_eq_true, ↓reduceIte]
+    refine ⟨⟨?_, hfac.trans hfactory.symm, ?_, ?_, ?_⟩, ?_⟩
     · intro label check hmem
       rw [show copyProc.spec.preconditions.toList = [] from by native_decide] at hmem
       simp at hmem
@@ -1404,6 +1456,14 @@ theorem copy_call_triple :
       simp only [List.mem_cons, List.not_mem_nil, or_false] at hmem
       obtain ⟨rfl, rfl⟩ := hmem
       exact ⟨intV ρ₀.factory av, hAOx, rfl⟩
+    · intro id ty hmem
+      rw [show copyProc.header.outputs.toList = [(resultId, Lambda.LMonoTy.int)]
+        from by native_decide] at hmem
+      simp only [List.mem_singleton] at hmem
+      obtain ⟨rfl, rfl⟩ := hmem
+      rw [hz] at hzvz
+      obtain rfl := Option.some.inj hzvz
+      exact ⟨_, hAOr, rfl⟩
     · exact
         { toWellFormedSemanticEval := Core.coreFactory_WellFormedSemanticEval _ hfac
           storeWellDefined := hwfAO
@@ -1428,13 +1488,14 @@ theorem copy_call_triple :
             simp at hn
           reservedFresh := by intro n _ name _ p hp; simp [testParams] at hp
           factoryDeclared := by intro nm _; rfl
+          runtimeFactoryDeclared := by intro f _; rfl
           initTypesInhabited := by
             intro ty hty
             rw [show Imperative.DetCFG.initTypes copyCFG = [] from by native_decide] at hty
             simp at hty }
   · -- hexit
     intro ρ₀ proc ρ' σ' σAO hpre hwf hlk hpost houtputsρ hρ'fac hce hframeRel hcallexit
-    obtain rfl : proc = copyProc := Option.some.inj (hlk.symm.trans copy_find)
+    obtain rfl : proc = copyProc := Option.some.inj (hlk.symm.trans copy_callee)
     obtain ⟨hfac, ⟨av, ha⟩, _hz⟩ := hpre
     obtain ⟨hAOx, _, _⟩ := copy_callentry_facts ha hce
     have hdisjx : ([xIdC] : List Core.Expression.Ident).Disj

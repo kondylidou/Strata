@@ -114,13 +114,13 @@ private theorem fDef_shape : fDef = {
 private def bodyExpr : Core.Expression.Expr :=
   match computeProc.body with
   | .structured [Imperative.Stmt.cmd
-      (Imperative.CmdExt.cmd (Imperative.Cmd.set _ (.det e) _))] => e
+      (Imperative.CmdExt.cmd (Imperative.Cmd.set _ (.det e) _))] false => e
   | _ => Imperative.HasBool.ff
 
 private def bodyMd : Imperative.MetaData Core.Expression :=
   match computeProc.body with
   | .structured [Imperative.Stmt.cmd
-      (Imperative.CmdExt.cmd (Imperative.Cmd.set _ _ md))] => md
+      (Imperative.CmdExt.cmd (Imperative.Cmd.set _ _ md))] false => md
   | _ => #[]
 
 /-- The expression assigned by `Compute` is `f(x, y)`. -/
@@ -131,7 +131,7 @@ private theorem bodyExpr_shape :
 
 /-- `Compute` consists of the single assignment `z := bodyExpr`. -/
 private theorem compute_body_shape :
-    computeProc.body = .structured [Core.Statement.set zId bodyExpr bodyMd] := by
+    computeProc.body = .structured [Core.Statement.set zId bodyExpr bodyMd] false := by
   native_decide
 
 private abbrev fDecl : Core.Decl := userFuncAST.decls.head!
@@ -319,7 +319,7 @@ example :
 private def assignedFunctionName? : Option String :=
   match computeProc.body with
   | .structured [Imperative.Stmt.cmd
-      (Imperative.CmdExt.cmd (Imperative.Cmd.set z (.det e) _))] =>
+      (Imperative.CmdExt.cmd (Imperative.Cmd.set z (.det e) _))] false =>
     if z.name != "z" then none
     else
       match (Lambda.getLFuncCall e).1 with
@@ -492,12 +492,13 @@ theorem compute_meets_contract :
     Core.Logic.Hoare.Procedure.contractTriple userFuncAST testParams "Compute" := by
   let command : Core.Command :=
     Imperative.CmdExt.cmd (Imperative.Cmd.set zId (.det bodyExpr) bodyMd)
-  refine Core.Logic.Hoare.Procedure.contractTriple_singleton_cmd
+  refine Core.Logic.Hoare.Procedure.contractTriple_singleton_cmd (opq := false)
+    (hmono := by native_decide)
     userFuncAST testParams "Compute" computeProc (by native_decide) command ?_ (by native_decide)
       ?_ ?_
   · simpa [command] using compute_body_shape
   · intro ρ₀ σ' emitted hpre _hwf hstep
-    obtain ⟨hchecks, hfac, _hold, htyped⟩ := hpre
+    obtain ⟨hchecks, hfac, _hold, htyped, -⟩ := hpre
     obtain ⟨vx, hx, hvx⟩ := htyped xId .int (by native_decide)
     obtain ⟨vy, hy, hvy⟩ := htyped yId .int (by native_decide)
     obtain ⟨a, hva⟩ := Lambda.SemValue.exists_ofInt hvx
@@ -656,7 +657,7 @@ private def fSpecCall : Core.Expression.Expr :=
 private def specEns : Core.Expression.Expr := .app Core.valueLoc (.app Core.valueLoc gtOp fSpecCall) zeroExpr
 
 /-- `CheckProduct` has an empty body. -/
-private theorem checkProduct_body : checkProductProc.body = .structured [] := by
+private theorem checkProduct_body : checkProductProc.body = .structured [] false := by
   native_decide
 
 /-- The first precondition of `CheckProduct` is `x > y`. -/
@@ -767,7 +768,7 @@ private theorem specPost_holds (ρ : Imperative.Env Core.Expression) (a b : Int)
     Core's evaluator is denotational: every model interprets `fSpec` as its body. -/
 theorem checkProduct_meets_contract :
     Core.Logic.Hoare.Procedure.contractTriple specOnlyAST testParams "CheckProduct" := by
-  refine Core.Logic.Hoare.Procedure.contractTriple_of_core_typed
+  refine Core.Logic.Hoare.Procedure.contractTriple_of_core_typed (hmono := by native_decide)
     specOnlyAST testParams "CheckProduct" checkProductProc []
       (by native_decide) checkProduct_body (by native_decide) ?_
   refine Strata.Logic.Hoare.consequence
@@ -776,7 +777,7 @@ theorem checkProduct_meets_contract :
       testParams "" #[]
       (Core.Logic.Hoare.Procedure.contractPre specFactory checkProductProc))
     (fun _ hpre => hpre) (fun ρ hpre => ?_)
-  obtain ⟨hchecks, hfac, _hold, htyped⟩ := hpre
+  obtain ⟨hchecks, hfac, _hold, htyped, -⟩ := hpre
   obtain ⟨vx, hx, hvx⟩ := htyped xId .int (by native_decide)
   obtain ⟨vy, hy, hvy⟩ := htyped yId .int (by native_decide)
   obtain ⟨a, hva⟩ := Lambda.SemValue.exists_ofInt hvx
@@ -801,7 +802,7 @@ example : fSpecDef.toLFunc.attr.contains .inline = false := by
 
 /-- `CheckProduct` has no output parameters and no executable statements. -/
 example : checkProductProc.header.outputs.isEmpty ∧
-    checkProductProc.body = .structured [] := by
+    checkProductProc.body = .structured [] false := by
   native_decide
 
 end Strata

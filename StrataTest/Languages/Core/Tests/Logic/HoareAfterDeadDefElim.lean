@@ -88,7 +88,7 @@ private abbrev maxBody : Core.Statements :=
    maxIte]
 
 /-- The translated body really is the two definitions followed by the `if`. -/
-private theorem max_body_eq : maxProc.body = .structured maxBody := by native_decide
+private theorem max_body_eq : maxProc.body = .structured maxBody false := by native_decide
 
 /-- Erasing the unread definitions leaves the `if` alone. -/
 private theorem max_dde : Imperative.DeadDefElim.deadDefElim [] maxBody = [maxIte] := by
@@ -109,7 +109,7 @@ private theorem max_decl : maxPgmAST.decls[0]? = some (.proc maxProc maxDeclMd) 
 theorem max_run_out :
     ∃ b out s', (Core.DeadDefElim.deadDefElimProgram maxPgmAST).run
         Core.Transform.CoreTransformState.emp = (.ok (b, out), s') ∧
-      Core.Decl.proc { maxProc with body := .structured [maxIte] } maxDeclMd ∈ out.decls := by
+      Core.Decl.proc { maxProc with body := .structured [maxIte] false } maxDeclMd ∈ out.decls := by
   refine ⟨_, _, _, rfl, ?_⟩
   have h := (Core.DeadDefElim.deadDefElimProgram_over (s := Core.Transform.CoreTransformState.emp)
     rfl (List.mem_of_getElem? max_decl) max_body_eq).1
@@ -156,7 +156,7 @@ private theorem maxTgt_triple :
       (Core.Logic.Hoare.Procedure.contractPre Core.Factory maxProc) [maxIte] Exit := by
   refine Core.Logic.Hoare.of_storeWF_pre π _
     (Core.Logic.Hoare.consequence π testParams (Pre := Entry) ?_
-    (fun ρ ⟨⟨_, hp, _, hin⟩, hwf⟩ =>
+    (fun ρ ⟨⟨_, hp, _, hin, _⟩, hwf⟩ =>
       have ⟨p, ha⟩ := Core.Logic.Hoare.Procedure.inputAsPredicate_int hwf hin aId (by native_decide)
       have ⟨q, hb⟩ := Core.Logic.Hoare.Procedure.inputAsPredicate_int hwf hin bId (by native_decide)
       ⟨hp, p, q, ha, hb⟩) (fun _ h => h))
@@ -237,7 +237,8 @@ theorem max_meets_contract :
   have hfactory : maxPgmAST.factoryBeforeProcedure "Max" = Core.Factory :=
     Core.Program.factoryBeforeProcedure_eq_core_of_noFunctions (by decide +kernel)
   rw [Core.Logic.Hoare.Procedure.contractTriple, hfactory]
-  refine ⟨maxProc, by native_decide, by native_decide, ?_⟩
+  refine ⟨maxProc, by native_decide,
+    Core.Procedure.forall_instance_of_typeArgs_nil (by native_decide) ⟨by native_decide, ?_⟩⟩
   rw [max_body_eq]
   -- The body proof does not use the axioms visible to the procedure.
   refine Core.Logic.Hoare.consequence _ _

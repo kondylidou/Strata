@@ -7,6 +7,7 @@ module
 
 public import Strata.DL.SMT.Term
 public import Strata.DL.SMT.StringLit
+public import Strata.DL.SMT.VerdictReader
 import Strata.DL.SMT.Symbol
 import Strata.DL.SMT.DDMTransform.Translate
 import Strata.Languages.Core.Options
@@ -27,13 +28,6 @@ works purely with `Term` values and delegates string rendering to the Solver via
 namespace Strata.SMT
 
 public section
-
-inductive Decision where
-  | sat
-  | unsat
-  | unknown
-  | timeout
-deriving DecidableEq, Repr
 
 /--
  An SMT-LIB solver process wrapper.
@@ -156,11 +150,13 @@ def solver : IO SMTLibSolver := do
   VC scripts to disk (e.g. `vcs/*.smt2`); see `bufferWriter` for the in-memory
   equivalent.
 
-  The file is flushed before this returns — including on exception.
+  The file is flushed before this returns — including on exception. `mode` is how the file is
+  opened: `.write` replaces an existing file, `.writeNew` fails if one exists.
 -/
 def withFileWriter (filename : String) (act : SolverM α)
-    (state : SolverState := SolverState.init) : IO (α × SolverState) := do
-  let handle ← IO.FS.Handle.mk filename IO.FS.Mode.write
+    (state : SolverState := SolverState.init) (mode : IO.FS.Mode := .write) :
+    IO (α × SolverState) := do
+  let handle ← IO.FS.Handle.mk filename mode
   let solver : SMTLibSolver := ⟨IO.FS.Stream.ofHandle handle, .none⟩
   try
     SolverM.run solver act state
@@ -365,36 +361,26 @@ private def readlnD (dflt : String) : SolverM String := do
   | .some stdout => stdout.getLine
   | .none        => pure dflt
 
+/-- Read the answer to the `check-sat` just sent and, after a `sat` or `unknown`, ask for the
+    values of `vars`. -/
+private def readCheckSatAnswer (vars : List String) : SolverM Decision := do
+  let result := (← readlnD "unknown").trimAscii.toString
+  match decodeVerdict result.toList with
+  | some .unsat => return .unsat
+  | some d =>
+    if !vars.isEmpty then
+      getValue vars
+    return d
+  | none => throw (IO.userError s!"Unrecognized solver output: {result}")
+
 def checkSat (vars : List String) : SolverM Decision := do
   emitln "(check-sat)"
-  let result := (← readlnD "unknown").trimAscii.toString
-  match result with
-  | "sat"     =>
-    if !vars.isEmpty then
-      getValue vars
-    return Decision.sat
-  | "unsat"   => return Decision.unsat
-  | "unknown" =>
-    if !vars.isEmpty then
-      getValue vars
-    return Decision.unknown
-  | other     => throw (IO.userError s!"Unrecognized solver output: {other}")
+  readCheckSatAnswer vars
 
 def checkSatAssuming (assumptions : List String) (vars : List String) : SolverM Decision := do
   let assumptionsStr := String.intercalate " " assumptions
   emitln s!"(check-sat-assuming ({assumptionsStr}))"
-  let result := (← readlnD "unknown").trimAscii.toString
-  match result with
-  | "sat"     =>
-    if !vars.isEmpty then
-      getValue vars
-    return Decision.sat
-  | "unsat"   => return Decision.unsat
-  | "unknown" =>
-    if !vars.isEmpty then
-      getValue vars
-    return Decision.unknown
-  | other     => throw (IO.userError s!"Unrecognized solver output: {other}")
+  readCheckSatAnswer vars
 
 def reset : SolverM Unit :=
   emitln "(reset)"

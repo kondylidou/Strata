@@ -55,6 +55,19 @@ def wireInterpretFlags : List Flag :=
    { name := "interpreter", help := "Only `cortex` is supported: the Cortex interpreter runs the program.",
      takesArg := .arg "cortex" }]
 
+/-- How a Cortex run exits, by Strata's convention (`ExitCode`): 0 when it passed, `failuresFound` when a check failed,
+`knownLimitation` when a stop ended it, with no verdict, and `internalError` on an interpreter error. -/
+def runExitCode (outcome : InterpretOutcome) : UInt8 :=
+  match outcome.outcome with
+  | .error => ExitCode.internalError
+  | .failed => ExitCode.failuresFound
+  | .stopped => ExitCode.knownLimitation
+  | .passed => 0
+
+def exitHelp : String :=
+  "Exits 0 when every entry passes, 2 when a check fails, 4 when a stop ends a run, with no verdict, where the program \
+   has no model or at one of the interpreter's bounds, and 3 on an interpreter error."
+
 def printDiagnostics (diagnostics : Array Message) : IO Unit := do
   IO.println s!"==== DIAGNOSTICS ===="
   for diag in diagnostics do
@@ -88,8 +101,9 @@ def runInterpret (ionBytes : ByteArray) (pflags : ParsedFlags) : IO Unit := do
   printDiagnostics outcome.diagnostics
   for (procName, reason) in outcome.errors do
     IO.eprintln s!"'{targetName?.getD procName}': {reason}"
-  unless outcome.errors.isEmpty do
-    IO.Process.exit ExitCode.failuresFound
+  let code := runExitCode outcome
+  unless code == 0 do
+    IO.Process.exit code
 
 def readWireProgram (bytes : ByteArray) : IO Wire.Program :=
   match Wire.readProgram bytes with
@@ -101,7 +115,26 @@ def selectWireEntry (program : Wire.Program) (entry : String) : Except String Wi
   | [p] =>
     if !p.inputs.isEmpty then .error s!"entry procedure '{entry}' takes arguments"
     else if p.body.isNone then .error s!"entry procedure '{entry}' has no body"
-    else .ok { program with procedures := program.procedures.map fun q => { q with entry := q.name == entry } }
+    else
+      let taken : Std.HashSet String := Std.HashSet.ofList <|
+        program.procedures.map (·.name) ++ program.globals.map (·.name) ++
+        program.composites.map (·.name) ++ program.constrained.map (·.name)
+      let src := p.source
+      let harnessName := Strata.Name.findUnique s!"{entry}?entry" 1 taken
+      let copy? : Option Wire.Procedure := if p.requires.isEmpty then none else
+        some { p with name := Strata.Name.findUnique s!"{entry}?entered" 1 (taken.insert harnessName),
+                      requires := [], entry := false }
+      let callee := (copy?.map (·.name)).getD entry
+      let harness : Wire.Procedure :=
+        { name := harnessName
+          inputs := [], outputs := [], throws := p.throws, requires := [], entry := true, source := src
+          body := some { entry := "entry", handlers := [], blocks := [
+            { label := "entry"
+              cmds := p.outputs.map (fun o => .init o.name o.ty none src) ++
+                [.call (p.outputs.map (·.name)) callee [] src]
+              transfer := .finish src }] } }
+      .ok { program with procedures :=
+        program.procedures.map ({ · with entry := false }) ++ copy?.toList ++ [harness] }
   | [] => .error s!"entry procedure '{entry}' not found"
   | _ => .error s!"entry procedure '{entry}' is ambiguous"
 
@@ -128,16 +161,17 @@ def runWireInterpret (ionBytes : ByteArray) (pflags : ParsedFlags) : IO Unit := 
     | .error msg => exitFailure msg
   printDiagnostics outcome.diagnostics
   for (procName, reason) in outcome.errors do
-    IO.eprintln s!"'{procName}': {reason}"
-  unless outcome.errors.isEmpty do
-    IO.Process.exit ExitCode.failuresFound
+    IO.eprintln s!"'{(pflags.getString "entry").getD procName}': {reason}"
+  let code := runExitCode outcome
+  unless code == 0 do
+    IO.Process.exit code
 
 def cortexInterpretBinaryCommand : Command where
   name := "cortexInterpretBinary"
   args := []
   flags := interpretFlags
   help := "Concretely interpret a Laurel Ion program read from stdin on the Cortex interpreter \
-           (Laurel → Cortex → execute) and print diagnostics."
+           (Laurel → Cortex → execute) and print diagnostics. " ++ exitHelp
   callback := fun _ pflags => do
     let ionBytes ← (← IO.getStdin).readBinToEnd
     runInterpret ionBytes pflags
@@ -165,15 +199,28 @@ def cortexWireInterpretBinaryCommand : Command where
   args := []
   flags := wireInterpretFlags
   help := "Concretely interpret a Cortex program in the Cortex wire format, read as Ion from stdin, \
-           on the Cortex interpreter, and print diagnostics."
+           on the Cortex interpreter, and print diagnostics. " ++ exitHelp
   callback := fun _ pflags => do
     runWireInterpret (← (← IO.getStdin).readBinToEnd) pflags
+
+def cortexWireCheckBinaryCommand : Command where
+  name := "cortexWireCheckBinary"
+  args := []
+  help := "Check a Cortex program in the Cortex wire format, read as Ion from stdin, without \
+           running it: translate it to Core and type-check it. Exit with an error naming the \
+           step that rejected it."
+  callback := fun _ _ => do
+    let program ← readWireProgram (← (← IO.getStdin).readBinToEnd)
+    match Cortex.checkWire program with
+    | .ok () => IO.println "Core type checking succeeded."
+    | .error e => exitFailure e
 
 def cortexFrontend : CliFrontend where
   dialects := []
   group := fun _ =>
     { name := "Cortex"
-      commands := [cortexInterpretBinaryCommand, cortexToCoreCommand, cortexWireInterpretBinaryCommand] }
+      commands := [cortexInterpretBinaryCommand, cortexToCoreCommand, cortexWireInterpretBinaryCommand,
+                   cortexWireCheckBinaryCommand] }
 
 end
 

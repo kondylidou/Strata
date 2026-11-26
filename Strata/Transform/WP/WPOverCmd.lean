@@ -233,13 +233,23 @@ private theorem spec_check (hF : WellFormedSemanticEvalBase F) (Lc : List P.Iden
         | obtain ⟨_, -, ⟨⟩⟩ := (Except.bind_is_ok _ _ _).1 hi
           exact ⟨[], .side .nil, nofun⟩
         | obtain ⟨a', ha', rfl⟩ := resolveItem_assume hi
-          first
+          unfold kAssume at ha'
+          split at ha' <;> first
+            | exact run_assume (ev_kMarkImp_fails hF hO.canonL hO.reach ha'
+                (ResTy.bool tE (OffInv.resTy hF hO hO.canonL (fun _ _ => id)
+                  (hΓ (.inl rfl)) hwt.2.1.1 hwt.2.2.1
+                  (fun p hp => ⟨(hren p hp).1, (hren p hp).2.1⟩)
+                  (fun y hy => (hrd y hy).imp fun _ h => ⟨h.1, h.2.2⟩) hwfS
+                  (fv_contFV fun _ => id))) hO.bools)
             | exact run_assume (ev_kImp_fails hF hO.canonL hO.reach ha'
                 (ResTy.bool tE (OffInv.resTy hF hO hO.canonL (fun _ _ => id)
                   (hΓ (.inl rfl)) hwt.2.1.1 hwt.2.2.1
                   (fun p hp => ⟨(hren p hp).1, (hren p hp).2.1⟩)
                   (fun y hy => (hrd y hy).imp fun _ h => ⟨h.1, h.2.2⟩) hwfS
                   (fv_contFV fun _ => id))) hO.bools)
+            | exact run_assume (ev_kMarkImp_holds hF hOn.canonL hOn.reach ha' (fun _ h => (ev_ren_onInv
+                hF hOn hOn.canonL (fun _ _ => rfl) hren hrd hwfS (fv_contFV fun _ => id) h).trans
+                (hfe _ (List.mem_singleton_self _))) (.inl rfl))
             | exact run_assume (ev_kImp_holds hF hOn.canonL hOn.reach ha' (fun _ h => (ev_ren_onInv
                 hF hOn hOn.canonL (fun _ _ => rfl) hren hrd hwfS (fv_contFV fun _ => id) h).trans
                 (hfe _ (List.mem_singleton_self _))) (.inl rfl))
@@ -697,7 +707,7 @@ private theorem spec_initNondet (hF : WellFormedSemanticEvalBase F) (Lc : List P
   intro st r st' hwf hrun T Y hfin items hres S hwfS Γ hΓ hwt hav Ex hEx k _ _ _ _ _ _
   have hW := wpStmt_walkOK hrun
   have hxav := hav x (List.mem_append_right _ (by simp [Block.idents, Stmt.idents]))
-  simp only [wpStmt, Bool.not_true, Bool.false_eq_true, ite_false] at hrun
+  simp only [wpStmt, keepInit, pure_bind, Bool.not_true, Bool.false_eq_true, ite_false] at hrun
   obtain ⟨n, s1, h1, hrun⟩ := wm_run_bind_ok hrun
   obtain ⟨_, s2, h2, hrun⟩ := wm_run_bind_ok hrun
   obtain ⟨_, s3, h3, hrun⟩ := wm_run_bind_ok hrun
@@ -753,7 +763,7 @@ private theorem spec_initDet (hF : WellFormedSemanticEvalBase F) (Lc : List P.Id
     StmtSpec F tE Lc κ d true (.cmd (.cmd (.init x ty (.det e) md))) := by
   intro st r st' hWF0 h T Y hFin items hres S ⟨hxS, hxLc, hS⟩ Γ hΓ hwt hav Ex hEx k _ _ _ _ _ _
   have hW := wpStmt_walkOK h
-  simp only [wpStmt, Bool.not_true, Bool.false_eq_true, ↓reduceIte, pure_bind] at h
+  simp only [wpStmt, keepInit, Bool.not_true, Bool.false_eq_true, ↓reduceIte, pure_bind] at h
   obtain ⟨⟨we, rd⟩, s0, h0, h⟩ := wm_run_bind_ok h
   obtain ⟨n, s1, h1, h⟩ := wm_run_bind_ok h
   obtain ⟨u, s2, h2, h⟩ := wm_run_bind_ok h
@@ -909,7 +919,7 @@ private theorem init_finalTy {Lc : List P.Ident} {x : P.Ident} {ty : P.Ty}
   have hW := wpStmt_walkOK hrun
   cases rhs with
   | nondet =>
-    simp only [wpStmt, Bool.not_true, Bool.false_eq_true, ite_false] at hrun
+    simp only [wpStmt, keepInit, pure_bind, Bool.not_true, Bool.false_eq_true, ite_false] at hrun
     obtain ⟨n, s1, h1, hrun⟩ := wm_run_bind_ok hrun
     obtain ⟨_, s2, h2, hrun⟩ := wm_run_bind_ok hrun
     obtain ⟨_, s3, h3, hrun⟩ := wm_run_bind_ok hrun
@@ -926,7 +936,7 @@ private theorem init_finalTy {Lc : List P.Ident} {x : P.Ident} {ty : P.Ty}
     exact fun m h => Option.some.inj ((wName_curName_keep hk x m h).symm.trans (wName_curName hk))
       ▸ hT
   | det e =>
-    simp only [wpStmt, Bool.not_true, Bool.false_eq_true, ↓reduceIte, pure_bind] at hrun
+    simp only [wpStmt, keepInit, Bool.not_true, Bool.false_eq_true, ↓reduceIte, pure_bind] at hrun
     obtain ⟨⟨we, rd⟩, s0, h0, h⟩ := wm_run_bind_ok hrun
     obtain ⟨n, s1, h1, h⟩ := wm_run_bind_ok h
     obtain ⟨u, s2, h2, h⟩ := wm_run_bind_ok h

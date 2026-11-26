@@ -83,7 +83,8 @@ def Cmd.eval [BEq P.Ident] [EC : EvalContext P S] (σ : S) (c : Cmd P) : Cmd P �
       let c' := .assume label e md
       match EC.denoteBool e with
       | some true => -- Satisified via evaluation.
-        (c', σ)
+        if EC.keepsTrueAssume label then (c', EC.addPathCondition σ [.assumption label e])
+        else (c', σ)
       | some false =>
         let σ := EC.addWarning σ (.AssumeFail label e)
         (c', EC.addPathCondition σ [.assumption label e])
@@ -112,6 +113,13 @@ def Cmds.eval [BEq P.Ident] [EvalContext P S] (σ : S) (cs : Cmds P) : Cmds P ×
 
 def stuck {P S} [EC : EvalContext P S] (σ : S) (message : String) : S :=
   EC.updateError σ (.Misc message)
+
+/-- The message for the condition of the statement `what` that did not reduce to a Boolean, with
+    the context's `explanation` of it when there is one. -/
+def unreducedMessage (what : String) (explanation : Option String) : String :=
+  match explanation with
+  | some why => s!"{what} condition did not reduce to bool: {why}"
+  | none => s!"{what} condition did not reduce to bool"
 
 /--
 Concrete execution for an Imperative Command.
@@ -181,7 +189,7 @@ def Cmd.run {P S} [BEq P.Ident] [EC : EvalContext P S] (σ : S) (c : Cmd P) : S 
         else
           EC.updateError σ (.AssertFail label e md)
       | none =>
-        EC.updateError σ (.Misc f!"assert ({label}) condition did not reduce to bool")
+        EC.updateError σ (.Misc (unreducedMessage s!"assert ({label})" (EC.explainUnreduced σ e)))
 
     | .assume label e _ =>
       -- When the context opts into `ignoreAssume`, treat the assume as a no-op
@@ -198,7 +206,7 @@ def Cmd.run {P S} [BEq P.Ident] [EC : EvalContext P S] (σ : S) (c : Cmd P) : S 
         | some false =>
           EC.updateError σ (.Misc f!"assume ({label}) condition is false")
         | none =>
-          EC.updateError σ (.Misc f!"assume ({label}) condition did not reduce to bool")
+          EC.updateError σ (.Misc (unreducedMessage s!"assume ({label})" (EC.explainUnreduced σ e)))
 
     | .cover _ _ _ =>
       -- In the future we can record when a cover is true

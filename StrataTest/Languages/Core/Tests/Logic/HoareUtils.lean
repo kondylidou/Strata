@@ -12,6 +12,7 @@ public import Strata.Languages.Core.Logic.TraceInterpUsingDenote
 public import Strata.Languages.Core.Logic.ContractToHoareTripleProps
 public import Strata.Languages.Core.Logic.InterpreterHoareRelation
 public import Strata.Languages.Core.ProgramProps
+public import Strata.Languages.Core.ProcedureProps
 public import Strata.Languages.Core.InstWellFormedSemanticsEval
 public import Strata.Languages.Core.IntEvalProps
 public import Strata.DL.Imperative.CFGSemanticsProps
@@ -40,7 +41,9 @@ about these fixtures belong in the library's `*Props` files.
   which a test spells out a translated body as a closed Core term (so that facts about a pass's
   output on it are decided by the kernel), and `intMono`, `intLTy`, `v`.
 * Store and contract facts: `Pinned`, `intOf`, the condition `ge0`, its value (`ge0_eval`) and
-  the contract facts it gives (`nonneg_of_pre`, `post_ge0`).
+  the contract facts it gives (`nonneg_of_pre`, `post_ge0`), the postcondition `eqInt` and its
+  contract fact `post_eqInt`, and the loop measure `intMeasure` read off an integer variable.
+* Single-assignment bodies: `setBlockWF` gives the gate of a body `x := e`.
 * Empty bodies: `blockWF_nil`, `run_procBlock_nil` and `reachable_nil` run an empty body, and
   `oldInoutAsPredicate_of_no_inout`, `preAsPredicate_of_no_pre` discharge the parts of a
   contract precondition a procedure has no clause for.
@@ -84,8 +87,8 @@ namespace Strata.HoareUtils
 /-- The body of the procedure of `p` named `n`. -/
 @[expose] def bodyOf (p : Core.Program) (n : String) : Core.Statements :=
   match (procOf p n).body with
-  | .structured ss => ss
-  | .cfg _ => []
+  | .structured ss _ => ss
+  | .cfg _ _ | .abstract => []
 
 /-- Fuel for the concrete evaluator, ample for the tests' bodies. -/
 @[expose] def fuel : Nat := 200
@@ -131,7 +134,8 @@ theorem bodyTerminates_of_progresses {p : Core.Program} {n : String}
     of procedure `n` with `Core.runLits`, deciding each premise of
     `Procedure.contractTriple_of_meetsContractOnLits` by `native_decide`. -/
 macro "contract_by_run " p:term:max n:term:max : term =>
-  `(Core.Logic.Hoare.Procedure.contractTriple_of_meetsContractOnLits $p
+  `(Core.Logic.Hoare.Procedure.contractTriple_of_meetsContractOnLits (opq := false)
+      (hmono := by native_decide) $p
       Strata.HoareUtils.testParams $n (Strata.HoareUtils.procOf $p $n)
       (Strata.HoareUtils.bodyOf $p $n) Strata.HoareUtils.fuel
       (by native_decide) (by native_decide) (by native_decide)
@@ -189,7 +193,7 @@ theorem nonneg_of_pre {proc : Core.Procedure} {ρ : Env Core.Expression}
     (hpre : ∀ lc ∈ proc.spec.preconditions.toList, lc.2.expr = ge0 x)
     (hne : proc.spec.preconditions.toList ≠ []) :
     ∃ k, ρ.store x = some (intOf ρ.factory k) ∧ 0 ≤ k := by
-  obtain ⟨hreq, hp, _, hin⟩ := h
+  obtain ⟨hreq, hp, _, hin, -⟩ := h
   obtain ⟨k, hk⟩ := Core.Logic.Hoare.Procedure.inputAsPredicate_int hwf hin x hx
   obtain ⟨⟨l, c⟩, hmem⟩ := List.exists_mem_of_ne_nil _ hne
   rcases hreq l c hmem ⟨fun _ => False⟩ with ⟨_, he⟩ | ⟨hnf, _⟩
@@ -211,6 +215,37 @@ theorem post_ge0 {proc : Core.Procedure} {ρ : Env Core.Expression} {x : Core.Ex
   rw [hpost _ hmem, ge0_eval hp hx, decide_eq_true hk]
   rfl
 
+/-- `x == k`. -/
+abbrev eqInt (x : Core.Expression.Ident) (k : Int) : Core.Expression.Expr :=
+  .eq Core.valueLoc (v x) (.intConst Core.valueLoc k)
+
+/-- **The contract's postcondition `x == k`.**  For a procedure whose postconditions are all
+    `x == k`: an environment over `Core.Factory` where `x` holds `k` satisfies the contract's
+    postcondition. -/
+theorem post_eqInt {proc : Core.Procedure} {ρ : Env Core.Expression} {x : Core.Expression.Ident}
+    {k : Int} (hpost : ∀ lc ∈ proc.spec.postconditions.toList, lc.2.expr = eqInt x k)
+    (hp : Pinned ρ) (hx : ρ.store x = some (intOf ρ.factory k)) :
+    Core.Logic.Hoare.Procedure.contractPost Core.Factory proc ρ := by
+  intro label check hmem _ _
+  refine .inl ⟨hp, ?_⟩
+  change Core.Expression.eval ρ.factory ρ.store check.expr = some (HasBool.ttVal ρ.factory)
+  rw [hpost _ hmem]
+  exact Core.eval_eq_true _ (Core.eval_fvar_int ρ.factory hx) (Core.eval_intConst _ _ k)
+
+open Classical in
+/-- A loop measure read off the integer `x` holds: `m n` where `x` holds `n`, and `0` where `x`
+    holds no integer. -/
+noncomputable def intMeasure (x : Core.Expression.Ident) (m : Int → Nat)
+    (ρ : Env Core.Expression) : Nat :=
+  if h : ∃ n : Int, ρ.store x = some (intOf ρ.factory n) then m h.choose else 0
+
+/-- Where `x` holds the integer `n`, `intMeasure x m` is `m n`. -/
+theorem intMeasure_eq {x : Core.Expression.Ident} {m : Int → Nat} {ρ : Env Core.Expression}
+    {n : Int} (hx : ρ.store x = some (intOf ρ.factory n)) : intMeasure x m ρ = m n := by
+  have h : ∃ n : Int, ρ.store x = some (intOf ρ.factory n) := ⟨n, hx⟩
+  rw [intMeasure, dite_eq_left_of_eq_true (eq_true h),
+    Lambda.SemValue.ofInt_injective (Option.some.inj (h.choose_spec.symm.trans hx))]
+
 /-! ## Empty bodies and contracts without clauses
 
 What the tests that refute a contract need of an empty body: it runs, from any
@@ -224,7 +259,7 @@ theorem blockWF_nil (ρ : Imperative.Env Core.Expression)
     (hsv : Imperative.WellFormedStore ρ.store ρ.factory) :
     Core.Logic.BlockInitEnvWF testParams [Imperative.Stmt.block "" [] #[]] ρ :=
   Core.Logic.blockInitEnvWF_procBlock_nil (Core.coreFactory_WellFormedSemanticEval _ hfac)
-    hsv rfl (fun _ _ => rfl)
+    hsv rfl (fun _ _ => rfl) (fun _ _ => rfl)
 
 /-- An empty body, wrapped as the procedure block a body actually runs in, returns to
     its own environment: entering and leaving the block projects the store through
@@ -264,6 +299,46 @@ theorem preAsPredicate_of_no_pre (factory : Lambda.Factory Core.CoreLParams)
     (h : proc.spec.preconditions.toList = []) :
     Core.Logic.Hoare.Procedure.preAsPredicate factory proc ρ := by
   intro label check hmem; rw [h] at hmem; simp at hmem
+
+/-! ## Single-assignment bodies -/
+
+/-- The gate of `x := e` wrapped as a procedure body holds at an entry over `Core.Factory` with a
+    well-formed store that binds `x` and the variables `e` reads, under a typing of the store that
+    `e`'s annotations agree with. -/
+theorem setBlockWF (x : Core.Expression.Ident) (e : Core.Expression.Expr)
+    (md : MetaData Core.Expression) (ρ : Env Core.Expression)
+    (hf : ρ.factory.factory = Core.Factory) (hsv : WellFormedStore ρ.store ρ.factory)
+    (hreads : ∀ n ∈ HasVarsImp.readVars (P := Core.Expression)
+        (CmdExt.cmd (Cmd.set x (.det e) md)), (ρ.store n).isSome = true)
+    (hres : (ρ.store x).isSome = true)
+    (hty : ∃ Γ, StoreHasTyping ρ.factory ρ.store Γ ∧
+      Γ.annotates (HasTypedVarsImp.typedReadVars (P := Core.Expression)
+        (CmdExt.cmd (Cmd.set x (.det e) md)))) :
+    Core.Logic.BlockInitEnvWF testParams
+      [Stmt.block "" [Stmt.cmd (CmdExt.cmd (Cmd.set x (.det e) md))] #[]] ρ := by
+  refine Core.Logic.BlockInitEnvWF.of_defUseOk (Core.coreFactory_WellFormedSemanticEval _ hf)
+    hsv (fun n hn => ?_) (fun n hn => ?_) (fun n _ p hp => ?_)
+    (fun _ _ p hp => by simp [testParams] at hp) ?_ (fun _ _ => rfl) (fun _ _ => rfl)
+    (by
+      simp [Block.InitTypesInhabited, Block.initTypes, Stmt.initTypes,
+        HasInitTypesImp.initTypes, CmdExt.initTypes, Cmd.initTypes])
+    (by obtain ⟨Γ, hσ, ha⟩ := hty; exact ⟨Γ, hσ, ⟨ha, trivial⟩, trivial⟩)
+    (by simp [Block.measures, Stmt.measures])
+  · simp [Block.definedVars, Stmt.definedVars, HasVarsImp.definedVars, CmdExt.definedVars,
+      Cmd.definedVars] at hn
+  · simp [Block.definedVars, Stmt.definedVars, HasVarsImp.definedVars, CmdExt.definedVars,
+      Cmd.definedVars] at hn
+  · simp [testParams] at hp
+  · simp only [Block.defUseWellFormed, Stmt.defUseWellFormed, HasVarsImp.definedVars,
+      CmdExt.definedVars, Cmd.definedVars, List.all_nil, Bool.and_true, testParams,
+      Bool.and_eq_true, List.all_eq_true]
+    refine ⟨⟨?_, ?_⟩, ?_⟩
+    · intro n hn; exact hreads n hn
+    · intro n hn
+      simp only [HasVarsImp.modifiedVars, CmdExt.modifiedVars, Cmd.modifiedVars,
+        List.mem_singleton] at hn
+      subst hn; exact hres
+    · intro n _; trivial
 
 /-! ## Tactics -/
 

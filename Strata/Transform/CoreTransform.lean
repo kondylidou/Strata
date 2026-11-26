@@ -46,53 +46,56 @@ def genIdent (ident : Expression.Ident) (pf : String → String)
   : CoreGenM Expression.Ident :=
     CoreGenState.gen (pf ident.name)
 
-/--
-Generate identifiers in the form of arg_... that can be used to reduce argument expressions to temporary variables.
--/
-def genArgExprIdent
-  : CoreGenM Expression.Ident :=
-    genIdent "arg" tmpVarPrefix
+/-- A fresh variable named after `pf ident`, drawn from the generator's counter, and not in
+    `taken`. The counter alone keeps it apart from the names it generated before; `taken` must
+    hold the program's own variable names, which the counter does not know. -/
+def genTempIdent (taken : Std.HashSet String) (ident : Expression.Ident)
+    (pf : String → String) : CoreGenM Expression.Ident :=
+  CoreGenState.genAvoiding taken ⟨pf ident.name, ()⟩
 
-def genArgExprIdents (n:Nat)
+/-- A fresh temporary `tmp_arg_N`, not in `taken`, to hold an argument expression. -/
+def genArgExprIdent (taken : Std.HashSet String)
+  : CoreGenM Expression.Ident :=
+    genTempIdent taken "arg" tmpVarPrefix
+
+/-- `n` fresh argument temporaries (`genArgExprIdent`). -/
+def genArgExprIdents (taken : Std.HashSet String) (n : Nat)
   : CoreGenM (List Expression.Ident) :=
-  List.mapM (fun _ => genArgExprIdent) (List.replicate n ())
+  List.mapM (fun _ => genArgExprIdent taken) (List.replicate n ())
 
-/--
-Retrieves a fresh identifier from the counter generator the given identifier "ident" within old(...), or retrieve an existing one from the exprMap
-Assumes that ident contains no duplicates
--/
-def genOutExprIdent (ident : Expression.Ident)
+/-- A fresh temporary `tmp_<ident>_N`, not in `taken`, to hold the value of the output
+    variable `ident` before the call. -/
+def genOutExprIdent (taken : Std.HashSet String) (ident : Expression.Ident)
   : CoreGenM Expression.Ident :=
-    genIdent ident tmpVarPrefix
+    genTempIdent taken ident tmpVarPrefix
 
-def genOutExprIdents (idents : List Expression.Ident)
+/-- One fresh output temporary (`genOutExprIdent`) per identifier of `idents`. -/
+def genOutExprIdents (taken : Std.HashSet String) (idents : List Expression.Ident)
   : CoreGenM (List Expression.Ident)
-  := List.mapM genOutExprIdent idents
+  := List.mapM (genOutExprIdent taken) idents
 
-/--
-Retrieves a fresh identifier from the counter generator the given identifier "ident" within old(...), or retrieve an existing one from the exprMap
-Assumes that ident contains no duplicates
--/
-def genOldExprIdent (ident : Expression.Ident)
+/-- A fresh variable `old_<ident>_N`, not in `taken`, to hold the value of `ident` that
+    `old ident` denotes. -/
+def genOldExprIdent (taken : Std.HashSet String) (ident : Expression.Ident)
   : CoreGenM Expression.Ident :=
-    genIdent ident oldVarPrefix
+    genTempIdent taken ident oldVarPrefix
 
-def genOldExprIdents (idents : List Expression.Ident)
+/-- One fresh `old` variable (`genOldExprIdent`) per identifier of `idents`. -/
+def genOldExprIdents (taken : Std.HashSet String) (idents : List Expression.Ident)
   : CoreGenM (List Expression.Ident)
-  := List.mapM genOldExprIdent idents
+  := List.mapM (genOldExprIdent taken) idents
 
 /-- Generate one fresh type name (`TyIdentifier = String`) from the
     shared `CoreGenState` counter — the same monotonic counter that backs the
     term-temp generators — so names are deterministic, resume-safe, and unique
     across call sites without adding any new state; a name in `taken` is drawn again
-    (`CoreGenState.genAvoiding`). Mirrors `genIdent`.
+    (`CoreGenState.genAvoiding`). Mirrors `genTempIdent`.
 
     NOTE: `CoreGenState.gen` records every generated name in `γ.generated`,
-    including generated type names, which — unlike term temps — never get a
-    store binding. Any proof relying on
-    `∀ v, v ∈ γ.generated ↔ ((σ v).isSome ∧ CoreIdent.isTemp v)`
-    (e.g. `callElimStatementCorrect`) needs `generated` split by kind
-    (term-temp vs. type name) so that invariant ranges only over term temps. -/
+    including generated type names, which, unlike term temporaries, never get a
+    store binding. Call elimination keeps its temporaries apart from the program's
+    variables by `taken`, not by `generated`, so the extra
+    names are harmless. -/
 def genTyVarName (prefixStr : String) (taken : Std.HashSet String) :
     CoreGenM Lambda.TyIdentifier := do
   let id ← CoreGenState.genAvoiding taken ⟨prefixStr, ()⟩
@@ -125,29 +128,31 @@ def callArgType? (vt : TypeSpec.TypeScopes) : Expression.Expr → Option Lambda.
   | .fvar _ x none => vt.monoType? x
   | e => e.typeCheck []
 
-/-- The type instance of a call to `proc`: one-way matching of `proc`'s formal types against the
-    known types of the call's arguments and result variables gives each type parameter it
-    determines; every other parameter gets a fresh opaque type at `prefixStr` that is not in
-    `taken`, and so does every parameter when the matching fails. On a type-checked program
-    the matching cannot fail; the fallback serves callers that pass a program that was not
-    type-checked. -/
+/-- The type instance of a call to `proc` whose stored type arguments are `tyArgs`: the instance
+    `Procedure.callTypeArgs` gives; every other parameter gets a fresh opaque type at
+    `prefixStr` that is not in `taken`, and so does every parameter when the matching fails. On a
+    type-checked program the matching cannot fail, and the checker rejects a call that leaves a
+    callee type parameter undetermined (`ProcWellTyped.declTyVarsBound`), so the fresh opaque
+    types serve only programs that were not type-checked. An error means the stored `tyArgs`
+    disagree with the argument types. -/
 def callTypeSubst (prefixStr : String) (taken : Std.HashSet String) (vt : TypeSpec.TypeScopes)
-    (proc : Procedure) (callArgs : List (Imperative.CallArg Expression)) :
-    CoreGenM Lambda.Subst := do
+    (proc : Procedure) (callArgs : List (Imperative.CallArg Expression))
+    (tyArgs : Option (List Expression.Ty)) : CoreGenM (Except String Lambda.Subst) := do
   let typeArgs := proc.header.typeArgs
   let argTy : Imperative.CallArg Expression → Option Lambda.LMonoTy
     | .inArg e => callArgType? vt e
     | .inoutArg x | .outArg x => vt.monoType? x
-  match proc.matchCall? ((Imperative.CallArg.inputArgs callArgs).map argTy)
+  match proc.callTypeArgs tyArgs ((Imperative.CallArg.inputArgs callArgs).map argTy)
       ((Imperative.CallArg.resultArgs callArgs).map argTy) with
-  | none =>
+  | .error msg => return .error msg
+  | .ok none =>
     -- TODO: prove that the transformations preserve typing; then this branch is provably
     -- unreachable on pipeline input.
-    freshenTypeArgsSubst prefixStr taken typeArgs
-  | some S =>
+    return .ok (← freshenTypeArgsSubst prefixStr taken typeArgs)
+  | .ok (some S) =>
     let fresh ← freshenTypeArgsSubst prefixStr taken
       (typeArgs.filter fun a => (S.find? a).isNone)
-    return fresh ++ [S]
+    return .ok (fresh ++ [S])
 
 /-- Cached results of program analyses that are helpful for program
     transformation.
@@ -220,6 +225,16 @@ def liftDiag {α : Type} (e : Except Strata.Message α) : CoreTransformM α :=
   | .ok a => pure a
   | .error dm => throw dm
 
+/-- `callTypeSubst`, with an error reported as a breach of the well-formed-calls requirement
+    of the pass named `pass`. -/
+def callTypeSubstOrBreach (pass : String) (md : Imperative.MetaData Expression)
+    (prefixStr : String) (taken : Std.HashSet String) (vt : TypeSpec.TypeScopes)
+    (proc : Procedure) (callArgs : List (Imperative.CallArg Expression))
+    (tyArgs : Option (List Expression.Ty)) : CoreTransformM Lambda.Subst := do
+  match ← callTypeSubst prefixStr taken vt proc callArgs tyArgs with
+  | .ok S => pure S
+  | .error msg => throw (wellFormedCallsBreach pass md msg)
+
 /-- Get the factory from state. -/
 def getFactory : CoreTransformM (@Lambda.Factory CoreLParams) := do
   return (← get).factory
@@ -241,9 +256,9 @@ def bumpCounter (key : String) : CoreTransformM Nat := do
 
 /-- Runs `t`, then declares at the start of its output a nullary type for
     each name the generator drew at `prefixStr` during the run (the opaque
-    types of `callTypeSubst`), except the names in `taken`, which the generator
-    drew and skipped. `taken` is the input program's type names with
-    `prefixStr`; `t` must keep the program's type names. -/
+    types of `callTypeSubst`), except the names in `taken`, which the generator drew and
+    skipped. `taken` is the input program's type names with `prefixStr`; `t` must keep the
+    program's type names. -/
 def declareGeneratedTypes (prefixStr : String) (taken : Std.HashSet String)
     (t : CoreTransformM (Bool × Program)) :
     CoreTransformM (Bool × Program) := do
@@ -265,28 +280,28 @@ def declareGeneratedTypes (prefixStr : String) (taken : Std.HashSet String)
 /--
 returned list has the shape
 ((generated_name, ty), original_expr)
-Only types of the 'inputs' parameter are used
+Only types of the 'inputs' parameter are used. The generated names avoid `taken`.
 -/
-def genArgExprIdentsTrip
+def genArgExprIdentsTrip (taken : Std.HashSet String)
   (inputs : @Lambda.LTySignature Visibility)
   (args : List Expression.Expr)
   : CoreTransformM (List ((Expression.Ident × Lambda.LTy) × Expression.Expr))
   := do
   if inputs.length ≠ args.length then throw (Strata.Message.fromString "input length and args length mismatch")
-  else let gen_idents ← genArgExprIdents args.length
+  else let gen_idents ← genArgExprIdents taken args.length
        return (gen_idents.zip inputs.unzip.2).zip args
 
 /--
 returned list has the shape
 `((generated_name, ty), original_name)`
-Only types of the 'outputs' parameter are used.
+Only types of the 'outputs' parameter are used. The generated names avoid `taken`.
 -/
-def genOutExprIdentsTrip
+def genOutExprIdentsTrip (taken : Std.HashSet String)
   (outputs : @Lambda.LTySignature Visibility)
   (lhs : List Expression.Ident)
   : CoreTransformM (List ((Expression.Ident × Expression.Ty) × Expression.Ident)) := do
   if outputs.length ≠ lhs.length then throw (Strata.Message.fromString "output length and lhs length mismatch")
-  else let gen_idents ← genOutExprIdents lhs
+  else let gen_idents ← genOutExprIdents taken lhs
        return (gen_idents.zip outputs.unzip.2).zip lhs
 
 /--
@@ -406,6 +421,23 @@ def createInitVarCmd (trip : (Expression.Ident × Expression.Ty) × Expression.I
 def createInitVarCmds (trips : List ((Expression.Ident × Expression.Ty) × Expression.Ident))
     (md : Imperative.MetaData Expression) : List Command :=
   trips.map (createInitVarCmd · md)
+
+/-- `g` with `decls` at the start of its entry, where they dominate every block.
+    When the entry is a branch target (a loop header), declarations there would run
+    again on every iteration, so they go in a fresh entry block (labelled from
+    `base`) that falls through to the old one. The block holding the declarations is
+    listed first: in the concrete syntax a declaration is in scope only in the blocks
+    listed after it. -/
+def declareAtEntry (g : DetCFG) (decls : List Command) (base : String) : DetCFG :=
+  if decls.isEmpty then g
+  else if g.blocks.any fun (_, b) => b.transfer.targets.contains g.entry then
+    let entry := Strata.Name.freshName (Std.HashSet.ofList g.labels) base
+    { entry, blocks := (entry, { cmds := decls, transfer := .goto g.entry .empty }) :: g.blocks }
+  else
+    let (entryBlocks, rest) := g.blocks.partition (·.1 == g.entry)
+    let entryBlocks := entryBlocks.map fun (lbl, blk) =>
+      (lbl, { blk with cmds := decls ++ blk.cmds })
+    { g with blocks := entryBlocks ++ rest }
 
 /--
 Generate the substitution pairs needed for the body of the procedure
@@ -529,7 +561,8 @@ A CFG body is rewritten whole by `cfgBody` when it is `some k` (`k proc g` retur
 changed `g` and the new graph), else command by command by `cfgCmd` when it is `some h` (`h`
 is run on each command of its blocks, `runCFGCmds`), with the current procedure and program set
 as for a structured body; `cfgCmd` is not used when `cfgBody` is given. When both are `none`, a
-CFG body in a listed procedure is an error.
+CFG body in a listed procedure is an error. An abstract body has no statements and is left
+unchanged.
 
 The returned boolean is false if neither `f`, `cfgCmd` nor `cfgBody` reported a change in any
 procedure of `p` that is a member of `targetProcList` (if it is `.some ..`). The requirement on
@@ -565,18 +598,19 @@ def runProgramTyped
         })
 
         let (changed, newBody) ← match proc.body, cfgBody, cfgCmd with
-          | .structured ss, _, _ => do
+          | .structured ss o, _, _ => do
             let (changed, ss') ← runStmtsRecTyped f (TypeSpec.procBodyScopes [] proc) ss
-            pure (changed, Procedure.Body.structured ss')
-          | .cfg g, some k, _ => do
+            pure (changed, Procedure.Body.structured ss' o)
+          | .cfg g o, some k, _ => do
             let (changed, g') ← k proc g
-            pure (changed, Procedure.Body.cfg g')
-          | .cfg _, none, none => throw (Strata.Message.fromString
+            pure (changed, Procedure.Body.cfg g' o)
+          | .cfg _ _, none, none => throw (Strata.Message.fromString
               s!"runProgram: cannot apply statement-level transform to CFG body (procedure '{proc.header.name.1}')")
-          | .cfg g, none, some h => do
+          | .cfg g o, none, some h => do
             let (changed, g') ← runCFGCmdsTyped h
               ((TypeSpec.procBodyScopes [] proc).addCFGInits g) g
-            pure (changed, Procedure.Body.cfg g')
+            pure (changed, Procedure.Body.cfg g' o)
+          | .abstract, _, _ => pure (false, Procedure.Body.abstract)
 
         if changed then
           newDecls := newDecls.set i (Decl.proc { proc with body := newBody } md)

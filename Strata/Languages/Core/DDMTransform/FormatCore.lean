@@ -144,6 +144,13 @@ namespace ToCSTContext
 
 def empty {M} : ToCSTContext M := { scopes := #[{}] }
 
+/-- The name to display for `name`: its base when `name` is a copy's name, and `name` itself
+    otherwise. A program function (`progFnNames`) is displayed as written, even when its name
+    looks like a copy's. -/
+def displayBaseName {M} (ctx : ToCSTContext M) (name : String) : String :=
+  if ctx.progFnNames.contains name then name
+  else Core.NameMangling.demangledBaseNameAnyPrefix name
+
 -- Format context for error messages
 private def toErrorString {M} (ctx : ToCSTContext M) : String :=
   let lines := ctx.scopes.toList.mapIdx fun i scope =>
@@ -411,7 +418,7 @@ def lconstToExpr {M} [Inhabited M] (c : Lambda.LConst) :
 /-- Handle 0-ary operations -/
 def handleZeroaryOps {M} [Inhabited M] (name : String)
     : ToCSTM M (CoreDDM.Expr M) :=
-  let (silent, name) := match Core.NameMangling.demangleFuncName name with
+  let (silent, name) := match Core.NameMangling.demangleFuncNameAnyPrefix name with
                        | some (base, _) => (true, base)
                        | none => (false, name)
   open Core in
@@ -738,7 +745,7 @@ private def groupedBinaryCST? {M} [Inhabited M] (name : String) (arg1 arg2 : Cor
 /-- Handle unary operations -/
 def handleUnaryOps {M} [Inhabited M] (name : String) (arg : CoreDDM.Expr M)
     : ToCSTM M (CoreDDM.Expr M) :=
-  let (silent, name) := match Core.NameMangling.demangleFuncName name with
+  let (silent, name) := match Core.NameMangling.demangleFuncNameAnyPrefix name with
                        | some (base, _) => (true, base)
                        | none => (false, name)
   let ty := CoreType.tvar default unknownTypeVar
@@ -755,6 +762,10 @@ def handleUnaryOps {M} [Inhabited M] (name : String) (arg : CoreDDM.Expr M)
   -- Strings and regexes
   | .str .Length => pure (.str_len default arg)
   | .str .ToRegEx => pure (.str_toregex default arg)
+  | .str .ToCode => pure (.str_to_code default arg)
+  | .str .FromCode => pure (.str_from_code default arg)
+  | .str .FromInt => pure (.str_from_int default arg)
+  | .str .ToInt => pure (.str_to_int default arg)
   | .re .Star => pure (.re_star default arg)
   | .re .Plus => pure (.re_plus default arg)
   | .re .Comp => pure (.re_comp default arg)
@@ -776,7 +787,7 @@ def handleUnaryOps {M} [Inhabited M] (name : String) (arg : CoreDDM.Expr M)
 /-- Handle binary operations -/
 def handleBinaryOps {M} [Inhabited M] (name : String)
     (arg1 arg2 : CoreDDM.Expr M) : ToCSTM M (CoreDDM.Expr M) :=
-  let (silent, name) := match Core.NameMangling.demangleFuncName name with
+  let (silent, name) := match Core.NameMangling.demangleFuncNameAnyPrefix name with
                        | some (base, _) => (true, base)
                        | none => (false, name)
   let ty := CoreType.tvar default unknownTypeVar
@@ -840,7 +851,7 @@ def handleBinaryOps {M} [Inhabited M] (name : String)
 /-- Handle ternary operations -/
 def handleTernaryOps {M} [Inhabited M] (name : String)
     (arg1 arg2 arg3 : CoreDDM.Expr M) : ToCSTM M (CoreDDM.Expr M) :=
-  let (silent, name) := match Core.NameMangling.demangleFuncName name with
+  let (silent, name) := match Core.NameMangling.demangleFuncNameAnyPrefix name with
                        | some (base, _) => (true, base)
                        | none => (false, name)
   let ty := CoreType.tvar default unknownTypeVar
@@ -866,7 +877,7 @@ def lopToExpr {M} [Inhabited M]
     : ToCSTM M (CoreDDM.Expr M) := do
   -- Demangle Factory-op references; program-function references keep their
   -- mangled name (they appear in `progFnNames`).
-  let (silent, displayName) := match Core.NameMangling.demangleFuncName name with
+  let (silent, displayName) := match Core.NameMangling.demangleFuncNameAnyPrefix name with
                               | some (base, _) => (true, base)
                               | none => (false, name)
   let ctx ← get
@@ -973,7 +984,7 @@ partial def lexprToExpr {M} [Inhabited M]
       | some (.tcons c [ety]) =>
         if c == coll then lmonoTyToCoreType ety else unknown
       | _ => unknown
-    match CoreOp.ofString (Core.NameMangling.demangledBaseName name.name) with
+    match CoreOp.ofString ((← get).displayBaseName name.name) with
     | .seq .Empty => pure (.seq_empty default (← elemTy "Sequence"))
     | .set .Empty => pure (.set_empty default (← elemTy "Set"))
     | _ => lopToExpr name.name []
@@ -1098,7 +1109,7 @@ partial def lappToExpr {M} [Inhabited M]
     -- from the op's function type `V → Map K V`.  Demangle first so a
     -- monomorphized reference (`$__mono#mapConst#K#V`) renders with its
     -- mandatory `<K>` annotation.
-    if Core.NameMangling.demangledBaseName fn.name == "mapConst" then
+    if (← get).displayBaseName fn.name == "mapConst" then
       match args with
       | [valArg] =>
         let valCST ← lexprToExpr valArg qLevel
@@ -1200,13 +1211,13 @@ def mkTypeArgsAnn {M} [Inhabited M] (typeArgs : List String) : Ann (Option (Type
 /-- Decompose a single-level `map_update(base, idx, val)` where `base` is (or starts
     with) an fvar matching `varName`. Returns `(indices, innerVal)` with indices
     in left-to-right order, or `none` if the expression is not this pattern. -/
-private def decomposeMapUpdate (varName : String)
+private def decomposeMapUpdate (baseOf : String → String) (varName : String)
     (e : Lambda.LExpr CoreLParams.mono)
     : Option (List (Lambda.LExpr CoreLParams.mono) × Lambda.LExpr CoreLParams.mono) :=
   let (head, args) := Lambda.getLFuncCall e
   match head, args with
   | .op _ opName _, [base, idx, val] =>
-    if Core.NameMangling.demangledBaseName opName.name == "update" then
+    if baseOf opName.name == "update" then
       match base with
       | .fvar _ ident _ =>
         if ident.name == varName then some ([idx], val)
@@ -1240,7 +1251,7 @@ partial def stmtToCST {M} [Inhabited M] (s : Core.Statement)
     pure result
   | .set name expr md => do
     -- Detect map_update(name, idx, val) pattern to produce lhsArray syntax
-    let (lhs, exprCST) ← match decomposeMapUpdate name.name expr with
+    let (lhs, exprCST) ← match decomposeMapUpdate (← get).displayBaseName name.name expr with
       | some (idxs, val) => do
         let baseLhs := Lhs.lhsIdent default ⟨default, name.name⟩
         let lhs ← idxs.foldlM (init := baseLhs) fun acc idx => do
@@ -1275,7 +1286,7 @@ partial def stmtToCST {M} [Inhabited M] (s : Core.Statement)
     let exprCST ← lexprToExpr expr 0
     let annotsAnn ← metadataToAnn md (← get).annFilter
     pure (.cover default annotsAnn labelAnn exprCST)
-  | .call pname coreCallArgs md => do
+  | .call pname _ coreCallArgs md => do
     let pnameAnn : Ann String M := ⟨default, pname⟩
     let mut callArgs : Array (CoreDDM.CallArg M) := #[]
     for a in coreCallArgs do
@@ -1376,7 +1387,7 @@ private def splitNondetGoto (cmds : List Core.Command)
     List Core.Command × Option (String × String) :=
   match tr, cmds.getLast? with
   | .condGoto (.fvar _ x _) lt lf _, some (.cmd (.init x' _ .nondet _)) =>
-    if x == x' && x.name.startsWith "$__nondet_" then (cmds.dropLast, some (lt, lf))
+    if x == x' && x.name.startsWith Core.nondetChoicePrefix then (cmds.dropLast, some (lt, lf))
     else (cmds, none)
   | _, _ => (cmds, none)
 
@@ -1404,18 +1415,30 @@ private def cfgBodyToCST {M} [Inhabited M]
   modify ToCSTContext.pushScope
   let mut blocks : Array (CFGBlock M) := #[]
   for (lbl, blk) in cfg.blocks do
+    -- The block's metadata, under the same `annFilter` as statement annotations,
+    -- except that a loop invariant is always printed: it decides what CFG loop
+    -- elimination checks, so a printed program without it would verify
+    -- differently when read back. It is printed before the block's commands, so
+    -- it is translated in the scope before their declarations.
+    let inv := Imperative.MetaData.loopInvariantKey
+    let blockFilter : MetadataAnnFilter := match (← get).annFilter with
+      | .none => .only (Std.HashSet.ofList [inv])
+      | .only ks => .only (ks.insert inv)
+      | .allExcept ks => .allExcept (ks.erase inv)
+      | .all => .all
+    let annotsAnn ← metadataToAnn blk.md blockFilter
     let (cmds, nondet) := splitNondetGoto blk.cmds blk.transfer
     let cmdsCST ← cmds.toArray.mapM fun c => stmtToCST (Imperative.Stmt.cmd c)
     let trCST ← transferToCST nondet blk.transfer
     let cmdsArg : CFGCmds M :=
       if cmdsCST.isEmpty then .cfg_cmds_nil default else .cfg_cmds default ⟨default, cmdsCST⟩
-    blocks := blocks.push (.cfg_block default ⟨default, lbl⟩ cmdsArg trCST)
+    blocks := blocks.push (.cfg_block default annotsAnn ⟨default, lbl⟩ cmdsArg trCST)
   modify ToCSTContext.popScope
   let blocksCST ← match blocks.back? with
     | none => do
       ToCSTM.logError "cfgBodyToCST" "CFG body has no blocks" cfg.entry
       pure (.cfg_blocks_one default
-        (.cfg_block default ⟨default, cfg.entry⟩ (.cfg_cmds_nil default)
+        (.cfg_block default ⟨default, none⟩ ⟨default, cfg.entry⟩ (.cfg_cmds_nil default)
           (.transfer_return default)))
     | some last =>
       pure (blocks.pop.foldr (fun b acc => .cfg_blocks_cons default b acc)
@@ -1489,18 +1512,27 @@ def procToCST {M} [Inhabited M] (proc : Core.Procedure)
       ⟨default, none⟩
     else
       ⟨default, some (Spec.spec_mk default specAnn)⟩
+  -- The `opaque` mark of a flagged body; an abstract body is opaque without it.
+  let opqAnn (opq : Bool) : Ann (Option (OpaqueMark M)) M :=
+    if opq then ⟨default, some (.opaque_mark default)⟩ else ⟨default, none⟩
   match proc.body with
-  | .structured ss =>
+  | .structured ss opq =>
     let bodyCST ← blockToCST ss
     let body : Ann (Option (CoreDDM.Block M)) M := ⟨default, some bodyCST⟩
     modify ToCSTContext.popScope
     let annotsAnn ← metadataToAnn md (← get).annFilter
-    pure (.command_procedure default annotsAnn name typeArgs arguments spec body)
-  | .cfg cfg =>
+    pure (.command_procedure default annotsAnn name typeArgs arguments spec (opqAnn opq) body)
+  | .cfg cfg opq =>
     let bodyCST ← cfgBodyToCST cfg
     modify ToCSTContext.popScope
     let annotsAnn ← metadataToAnn md (← get).annFilter
-    pure (.command_cfg_procedure default annotsAnn name typeArgs arguments spec bodyCST)
+    pure (.command_cfg_procedure default annotsAnn name typeArgs arguments spec (opqAnn opq)
+      bodyCST)
+  | .abstract =>
+    let body : Ann (Option (CoreDDM.Block M)) M := ⟨default, none⟩
+    modify ToCSTContext.popScope
+    let annotsAnn ← metadataToAnn md (← get).annFilter
+    pure (.command_procedure default annotsAnn name typeArgs arguments spec (opqAnn false) body)
 
 -- Recreate enough of `GlobalContext` from `ToCSTContext` obtained from
 -- `programToCST`, purely for formatting.
@@ -1544,6 +1576,12 @@ private def extractNames (exprs : List Core.Expression.Expr) :
     | _ => #[]
   exprs.foldl (fun acc expr => acc ++ extractFromExpr expr) #[]
 
+/-- The format context for Core programs, without a global context. Collecting the Core
+    keywords for `quoteKeywords` walks every declaration of the dialects, so it is done once
+    here rather than on each call of `formatWithDDM`. -/
+private def coreFormatContext : FormatContext :=
+  FormatContext.ofDialects Core_map {} { quoteKeywords := true }
+
 /-- Run the DDM formatting pipeline on a converted CST, appending any conversion errors.
     The optional `fmtErrors` parameter controls how errors are rendered; the default
     appends them on separate lines. -/
@@ -1555,7 +1593,7 @@ def formatWithDDM (finalCtx : ToCSTContext SourceRange)
     : Std.Format :=
   let dialects := Core_map
   let ddmCtx := recreateGlobalContext finalCtx
-  let ctx := FormatContext.ofDialects dialects ddmCtx {}
+  let ctx := coreFormatContext.withGlobalContext ddmCtx
   let state : FormatState := {
     openDialects := dialects.toList.foldl (init := {})
       fun a (d : Dialect) => a.insert d.name

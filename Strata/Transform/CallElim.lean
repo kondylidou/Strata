@@ -7,6 +7,8 @@ module
 public import Strata.Pipeline.Messages
 
 public import Strata.Languages.Core.PipelinePhase
+public import Strata.Languages.Core.MarkerLabels
+import Strata.Languages.Core.NameSets
 import Strata.Languages.Core.StatementType
 import Strata.Languages.Core.CallWF
 import Strata.DL.Lambda.LExprType
@@ -35,20 +37,22 @@ inductive Stats where
 /-- Label prefix for call-elimination assert statements. -/
 def callElimAssertPrefix : String := "callElimAssert_"
 
-/-- Label prefix for call-elimination assume statements. -/
-def callElimAssumePrefix : String := "callElimAssume_"
-
 /--
 The call elimination kernel: replace the call `procName(callArgs)` (with call-site metadata `md`)
 by the callee's contract, as a flat sequence of commands: `init`s for the argument, output and
 `old` temporaries, `assert`s of the (non-free) preconditions, `havoc`s of the call's outputs, and
 `assume`s of the postconditions. It introduces no control flow, so the result can replace the
 call in a structured body or in a CFG block alike. `vt` gives the declared types of the
-variables in scope at the call, and `taken` the type names the callee's opaque types must avoid.
+variables in scope at the call, `taken` the type names the callee's opaque types must avoid,
+and `takenVars` the names the temporaries avoid: the program's variable names
+(`Program.varNames`), since a temporary named like a program variable would overwrite it, and,
+as a precaution, its declaration names, since the SMT encoding names a free variable and a
+nullary function by their own names.
 -/
-def callElimCall (taken : Std.HashSet String) (vt : TypeSpec.TypeScopes) (procName : String)
-    (callArgs : List (CallArg Expression)) (md : Imperative.MetaData Expression) :
-    CoreTransformM (List Command) := do
+def callElimCall (taken takenVars : Std.HashSet String) (vt : TypeSpec.TypeScopes)
+    (procName : String)
+    (tyArgs : Option (List Expression.Ty)) (callArgs : List (CallArg Expression))
+    (md : Imperative.MetaData Expression) : CoreTransformM (List Command) := do
   let lhs := CallArg.getLhs callArgs
   incrementStat s!"{Stats.visitedCalls}"
 
@@ -61,7 +65,8 @@ def callElimCall (taken : Std.HashSet String) (vt : TypeSpec.TypeScopes) (procNa
     throw (wellFormedCallsBreach "Call elimination" md msg)
 
   -- Instantiates the callee's contract at this call's type instance.
-  let tySubst ← callTypeSubst callElimTyPrefix taken vt proc callArgs
+  let tySubst ←
+    callTypeSubstOrBreach "Call elimination" md callElimTyPrefix taken vt proc callArgs tyArgs
   let instantiatedTy (ty : Lambda.LMonoTy) : Lambda.LMonoTy := Lambda.LMonoTy.subst tySubst ty
   let instantiatedExpr (e : Expression.Expr) : Expression.Expr :=
     Lambda.LExpr.applyTypeSubst e tySubst
@@ -100,13 +105,13 @@ def callElimCall (taken : Std.HashSet String) (vt : TypeSpec.TypeScopes) (procNa
   let oldVars := oldPairs.map (·.1)
 
   let genArgTrips :=
-    genArgExprIdentsTrip (Lambda.LMonoTySignature.toTrivialLTy instantiatedInputs) args
+    genArgExprIdentsTrip takenVars (Lambda.LMonoTySignature.toTrivialLTy instantiatedInputs) args
   let argTrips
       : List ((Expression.Ident × Expression.Ty) × Expression.Expr)
       ← genArgTrips
 
   let genOutTrips :=
-    genOutExprIdentsTrip (Lambda.LMonoTySignature.toTrivialLTy instantiatedOutputs) lhs
+    genOutExprIdentsTrip takenVars (Lambda.LMonoTySignature.toTrivialLTy instantiatedOutputs) lhs
   let outTrips
       : List ((Expression.Ident × Expression.Ty) × Expression.Ident)
       ← genOutTrips
@@ -114,7 +119,7 @@ def callElimCall (taken : Std.HashSet String) (vt : TypeSpec.TypeScopes) (procNa
   -- Generate fresh variables for "old g" (one per modified variable in lhs).
   -- For input/output parameters, look up types from the callee's inputs.
   let oldParams := oldPairs.map (·.2)
-  let genOldIdents ← genOldExprIdents oldVars
+  let genOldIdents ← genOldExprIdents takenVars oldVars
   let oldTys ← oldParams.mapM fun param => do
     match instantiatedInputs.find? param with
     | some ty => pure (Lambda.LTy.forAll [] ty)
@@ -178,7 +183,7 @@ def callElimCall (taken : Std.HashSet String) (vt : TypeSpec.TypeScopes) (procNa
                   (Procedure.Spec.updateCheckExprs postconditions proc.spec.postconditions)
                   (ret_subst ++ arg_subst_filtered)
                   md
-                  callElimAssumePrefix
+                  (if proc.body.isOpaque then callElimPostPrefix else callElimAssumePrefix)
   -- Update cached CallGraph
   let σ ← get
   match σ.cachedAnalyses.callGraph, σ.currentProcedureName with
@@ -192,51 +197,74 @@ def callElimCall (taken : Std.HashSet String) (vt : TypeSpec.TypeScopes) (procNa
         cachedAnalyses := { σ.cachedAnalyses with callGraph := .none }}
   | _, _ => set σ
 
+  -- A call that havocs outputs of a callee that is not opaque and has no postconditions gets one
+  -- marked assumption `true` after the havocs (`callElimHavocPrefix`), as if the callee had
+  -- `ensures true`, so that a path through the havocked outputs carries a call-elimination
+  -- marker. A call without outputs havocs
+  -- nothing and gets none, and so does a call to an opaque callee: callers know it only through
+  -- its contract, which is the call semantics.
+  let assumes ← if assumes.isEmpty && !proc.body.isOpaque && !lhs.isEmpty then do
+      let havocMark ← genIdent "call" (fun s => s!"{callElimHavocPrefix}{s}")
+      pure [.cmd (.assume havocMark.toPretty (Lambda.LExpr.true default) md)]
+    else pure assumes
   return argInit ++ outInit ++ oldInit ++ asserts ++ havocs ++ assumes
 
 /-- Call elimination on a single command: a `call` is replaced by its callee's contract
     (`callElimCall`); every other command is declined (`.none`). -/
-def callElimCommand (taken : Std.HashSet String) (vt : TypeSpec.TypeScopes) (c : Command) :
+def callElimCommand (taken takenVars : Std.HashSet String) (vt : TypeSpec.TypeScopes)
+    (c : Command) :
     CoreTransformM (Option (List Command)) :=
   match c with
-  | .call procName callArgs md => .some <$> callElimCall taken vt procName callArgs md
+  | .call procName tyArgs callArgs md =>
+    .some <$> callElimCall taken takenVars vt procName tyArgs callArgs md
   | _ => return .none
 
 /--
-Call elimination on a single statement, given the declared types `vt` of the variables in scope
-and the type names `taken` the opaque types of a call must avoid: a `call` statement is
+Call elimination on a single statement, given the declared types `vt` of the variables in scope,
+the type names `taken` the opaque types of a call must avoid, and the variable names
+`takenVars` its temporaries must avoid: a `call` statement is
 rewritten by `callElimCommand`; every other statement returns `.none` so that `runStmtsRecTyped`
 traverses into it.
 -/
-def callElimCmd (taken : Std.HashSet String) (vt : TypeSpec.TypeScopes) (s : Statement)
+def callElimCmd (taken takenVars : Std.HashSet String) (vt : TypeSpec.TypeScopes) (s : Statement)
   : CoreTransformM (Option (List Statement)) := do
     match s with
-      | .cmd c => return (← callElimCommand taken vt c).map (·.map .cmd)
+      | .cmd c => return (← callElimCommand taken takenVars vt c).map (·.map .cmd)
       | _ => return .none
 
 /-- Call Elimination for an entire program by walking through all procedure
 bodies, structured ones and the blocks of CFG ones. -/
 def callElim' (p : Program) : CoreTransformM (Bool × Program) :=
   let taken := p.typeNamesWithPrefix callElimTyPrefix
+  let takenVars := p.varNames.insertMany (p.declaredNames ++ p.funcNames)
   declareGeneratedTypes callElimTyPrefix taken
-    (runProgramTyped (targetProcList := .none) (callElimCmd taken) p
-      (cfgCmd := some (callElimCommand taken)))
+    (runProgramTyped (targetProcList := .none) (callElimCmd taken takenVars) p
+      (cfgCmd := some (callElimCommand taken takenVars)))
 
 end CallElim
 
 /-- Call-elimination pipeline phase: the transform replaces procedure calls
     with assert/havoc/assume sequences, in structured bodies and in CFG blocks. If the
     obligation's path includes labels from call elimination, the callee body was replaced by
-    its contract, which is an over-approximation. The `init`s that replace a call in a CFG block
-    on a cycle are rejected by `CFG.typeCheck` (`checkNoLoopInits`) if the body is checked
-    again. -/
+    its contract, which is an over-approximation. A call to an opaque procedure (`Body.isOpaque`)
+    is not: its contract is its call semantics, so its postcondition assumptions carry
+    `callElimPostPrefix`, which is not a marker. A marker of a havoc (`callElimHavocPrefix`) has
+    the condition `true`, so where `--vcgen wp` keeps it under its reach condition
+    (`markerGuards`), a counterexample that falsifies that condition does not pass the call; a
+    postcondition assumption is a marker on every path that keeps it. The `init`s that replace a call in a CFG block on a
+    cycle are rejected by `CFG.typeCheck` (`checkNoLoopInits`) if the body is checked again. -/
 def callElimPipelinePhase : PipelinePhase where
-  transform := CallElim.callElim'
+  transform p := do
+    rejectMarkerLabels "call elimination" CallElim.callElimAssumePrefix p
+    rejectMarkerLabels "call elimination" CallElim.callElimHavocPrefix p
+    CallElim.callElim' p
   phase.name := "callElim"
+  phase.validationPrefixes := [CallElim.callElimAssumePrefix]
+  -- A call to a callee without postconditions becomes a bare `havoc` of its outputs.
+  phase.leavesUnmarkedAbstractions := true
   phase.getValidation obligation :=
-    if obligationHasLabelPrefix obligation CallElim.callElimAssumePrefix then
-      .modelToValidate (fun _ => /- TODO -/ false)
-    else .modelPreserving
+    markerValidation obligation [CallElim.callElimAssumePrefix, CallElim.callElimHavocPrefix]
+      (guarded := [CallElim.callElimHavocPrefix])
   phase.getAssertDescription label :=
     if label.startsWith CallElim.callElimAssertPrefix then
       let stripped := label.drop CallElim.callElimAssertPrefix.length |>.toString
@@ -263,7 +291,7 @@ def callElimPipelinePhase : PipelinePhase where
   preserves := factSet![.wellFormedCalls, .noCFGBodies, .noLoops, .noLoopInvariants,
                       .noLoopMeasures, .noPrecondsFromFuncs, .noNondetGuards, .noProcedureContracts,
                          .noPolymorphicProcedures,
-                         .noPolymorphicFunctions, .typeAnnotated, .exitsCovered]
+                         .noPolymorphicFunctions, .typeAnnotated, .exitsCovered, .noCFGCycles]
 
 end Core
 

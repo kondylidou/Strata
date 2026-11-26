@@ -112,7 +112,7 @@ private def procP (body : List Core.Statement) : Core.Decl :=
   .proc { header := { name := "P", typeArgs := [], inputs := [("c", .int)],
                       outputs := [("r", .int)] },
           spec := { preconditions := [], postconditions := [] },
-          body := .structured body } .empty
+          body := .structured body false } .empty
 
 /-- The body `assert [pc]: c == 0`. -/
 private def assertPc : List Core.Statement :=
@@ -192,22 +192,22 @@ private def printModesProvedAfterCheck (p : Core.Program) (hp : checkedFacts.hol
       | .error e => IO.println s!"error: {e}"
 
 /--
-info: symbolic pc: not proved
-wp pc: not proved
+info: symbolic pc: refuted
+wp pc: refuted
 -/
 #guard_msgs in
 #eval printModesProvedAfterCheck functionAst functionAst_facts
 
 /--
-info: symbolic pc: not proved
-wp pc: not proved
+info: symbolic pc: refuted
+wp pc: refuted
 -/
 #guard_msgs in
 #eval printModesProvedAfterCheck constAst constAst_facts
 
 /--
-info: symbolic pr: not proved
-wp pr: not proved
+info: symbolic pr: refuted
+wp pr: refuted
 -/
 #guard_msgs in
 #eval printModesProvedAfterCheck assignAst assignAst_facts
@@ -230,7 +230,7 @@ private def validation (names : List String) : Except String String := do
   | .error e => pure e
 
 /--
-info: Except.ok "phase #18 `commonSubexprElim` requires `noInits` but preceding phases only guarantee `noCFGBodies, noCalls, noLoops, noLoopInvariants, noLoopMeasures, staticSingleAssignment, noBetaRedexes, noPrecondsFromFuncs, hasObligationForm, noProcedureContracts, noPolymorphicProcedures, noPolymorphicFunctions, typeAnnotated, exitsCovered, armsHaveObligations`"
+info: Except.ok "phase #19 `commonSubexprElim` requires `noInits` but preceding phases only guarantee `noCFGBodies, noCalls, noLoops, noLoopInvariants, noLoopMeasures, staticSingleAssignment, noBetaRedexes, noLambdas, noPrecondsFromFuncs, hasObligationForm, noProcedureContracts, noPolymorphicProcedures, noPolymorphicFunctions, typeAnnotated, exitsCovered, armsHaveObligations`"
 -/
 #guard_msgs in
 #eval validation wpThenCSE
@@ -239,7 +239,7 @@ info: Except.ok "phase #18 `commonSubexprElim` requires `noInits` but preceding 
 nameable under `--vcgen wp`, the same list is rejected with the same diagnostic. -/
 
 /--
-info: Except.ok "phase #18 `commonSubexprElim` requires `noInits` but preceding phases only guarantee `noCFGBodies, noCalls, noLoops, noLoopInvariants, noLoopMeasures, staticSingleAssignment, noBetaRedexes, noPrecondsFromFuncs, hasObligationForm, noProcedureContracts, noPolymorphicProcedures, noPolymorphicFunctions, typeAnnotated, exitsCovered, armsHaveObligations`"
+info: Except.ok "phase #19 `commonSubexprElim` requires `noInits` but preceding phases only guarantee `noCFGBodies, noCalls, noLoops, noLoopInvariants, noLoopMeasures, staticSingleAssignment, noBetaRedexes, noLambdas, noPrecondsFromFuncs, hasObligationForm, noProcedureContracts, noPolymorphicProcedures, noPolymorphicFunctions, typeAnnotated, exitsCovered, armsHaveObligations`"
 -/
 #guard_msgs in
 #eval show Except String String from do
@@ -252,5 +252,23 @@ info: Except.ok "phase #18 `commonSubexprElim` requires `noInits` but preceding 
 /-- info: Except.ok "accepted" -/
 #guard_msgs in
 #eval validation ((Core.corePipelinePhases Core.VerifyOptions.quiet).map Core.phaseName)
+
+/-! The rewrite loop reduces the redexes of procedure bodies only, so it does not establish
+`noBetaRedexes`, which the back end requires: the default order of `--vcgen wp`, which ends with
+`betaReduce` and `lambdaLift`, is accepted, and the same order without those two is rejected. -/
+
+/-- The phase names of the `--vcgen wp` order. -/
+private def wpOrder : List String :=
+  (Core.corePipelinePhases { Core.VerifyOptions.quiet with vcgen := .wp }).map Core.phaseName
+
+/-- info: Except.ok "accepted" -/
+#guard_msgs in
+#eval validation wpOrder
+
+/--
+info: Except.ok "phase #17 `the verification back end` requires:\n  • `noBetaRedexes`: preceding phases only guarantee `noCFGBodies, noCalls, noLoops, noLoopInvariants, noLoopMeasures, staticSingleAssignment, noPrecondsFromFuncs, hasObligationForm, noProcedureContracts, noPolymorphicProcedures, noPolymorphicFunctions, typeAnnotated, exitsCovered, armsHaveObligations`\n  • `noLambdas`: preceding phases only guarantee `noCFGBodies, noCalls, noLoops, noLoopInvariants, noLoopMeasures, staticSingleAssignment, noPrecondsFromFuncs, hasObligationForm, noProcedureContracts, noPolymorphicProcedures, noPolymorphicFunctions, typeAnnotated, exitsCovered, armsHaveObligations`"
+-/
+#guard_msgs in
+#eval validation (wpOrder.dropLast.dropLast)
 
 end Strata.WPGlobalNameTest

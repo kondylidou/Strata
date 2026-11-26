@@ -26,7 +26,7 @@ open Core.Transform
 open ProcedureInlining
 open Strata
 open Std
-open Core.CallFixtures (runInlineCall)
+open Core.CallFixtures (runInlineCall tryInlineCall)
 
 /-! ## Procedure Inlining Examples -/
 
@@ -165,7 +165,7 @@ def alphaEquivStatement (s1 s2: Core.Statement) (map:IdMap)
 
   | .cmd c1, .cmd c2 =>
     match c1, c2 with
-    | .call procName1 callArgs1 _, .call procName2 callArgs2 _ =>
+    | .call procName1 _ callArgs1 _, .call procName2 _ callArgs2 _ =>
       let lhs1 := Imperative.CallArg.getLhs callArgs1
       let lhs2 := Imperative.CallArg.getLhs callArgs2
       let args1 := Imperative.CallArg.getInArgs callArgs1
@@ -222,7 +222,7 @@ end
 
 private def alphaEquiv (p1 p2:Core.Procedure):Except Format Bool := do
   match p1.body, p2.body with
-  | .structured ss1, .structured ss2 =>
+  | .structured ss1 _, .structured ss2 _ =>
     if ss1.length ≠ ss2.length then
       .error (s!"# statements do not match: in {p1.header.name}, "
           ++ s!"inlined fn one has {ss1.length}"
@@ -581,6 +581,55 @@ info: error: runProgram: cannot apply statement-level transform to CFG body
 #guard_msgs (whitespace := lax) in
 #eval IO.println (inlineShown (translate TestCFGCaller) ["top"])
 
+/-- `p` with the body of its procedure `name` marked opaque (`Body.isOpaque`). -/
+private def markOpaque (name : String) (p : Core.Program) : Core.Program :=
+  { p with decls := p.decls.map fun
+    | .proc q md =>
+      if q.header.name.name == name then
+        .proc { q with body := match q.body with
+          | .structured ss _ => .structured ss true
+          | b => b } md
+      else .proc q md
+    | d => d }
+
+/-- A caller of a callee with a body and a postcondition. -/
+private def TestOpaqueCallee :=
+#strata
+program Core;
+procedure leaf(x : int, out y : int)
+spec { ensures int.gt(y, x); }
+{
+  y := int.add(x, 1);
+};
+procedure top(n : int, out r : int) {
+  call leaf(n, out r);
+};
+#end
+
+-- An opaque callee is inlined as its contract: its postcondition is assumed after the havoc of
+-- its output, and its body is not inlined.
+/--
+info: program Core;
+
+procedure leaf (x : int, out y : int)
+spec {
+  ensures [leaf_ensures_0]: int.gt(y, x);
+  } opaque {
+  y := int.add(x, 1);
+};
+procedure top (n : int, out r : int)
+{
+  $__inline1_leaf$inlined: {
+    var $__inline1_x : int := n;
+    var $__inline1_y : int;
+    assume [$__inline1_leaf_ensures_0]: int.gt($__inline1_y, $__inline1_x);
+    r := $__inline1_y;
+  }
+};
+-/
+#guard_msgs in
+#eval IO.println (inlineShown (markOpaque "leaf" (translate TestOpaqueCallee)) ["top"])
+
 end ProcedureInliningExamples
 
 /-! ## Inlining at the call's type instance
@@ -697,10 +746,10 @@ procedure idp<a> (x : a, out r : a)
 };
 procedure Caller<a> (z : a)
 {
-  var w : (a);
+  var w : a;
   $__inline1_idp$inlined: {
     var $__inline1_x : a := z;
-    var $__inline1_r : (a);
+    var $__inline1_r : a;
     $__inline1_r := $__inline1_x;
     w := $__inline1_r;
   }
@@ -719,11 +768,11 @@ procedure pair<a, b> (x : a, y : b, out r : a)
 };
 procedure Caller<a, b> (x : a, y : b)
 {
-  var w : (b);
+  var w : b;
   $__inline1_pair$inlined: {
     var $__inline1_x : b := y;
     var $__inline1_y : a := x;
-    var $__inline1_r : (b);
+    var $__inline1_r : b;
     $__inline1_r := $__inline1_x;
     w := $__inline1_r;
   }
@@ -739,7 +788,7 @@ info: program Core;
 type $__inlinety_0;
 procedure q<a> ()
 {
-  assume [refl]: forall y : (a) :: y == y;
+  assume [refl]: forall y : a :: y == y;
 };
 procedure Caller ()
 {
@@ -759,7 +808,7 @@ type $__inlinety_0;
 procedure r<a, b> (x : a)
 {
   assert [refl]: x == x;
-  assume [reflB]: forall y : (b) :: y == y;
+  assume [reflB]: forall y : b :: y == y;
 };
 procedure Caller ()
 {
@@ -774,6 +823,114 @@ procedure Caller ()
 #eval IO.println (toString (runInlineCall (rProg rP)))
 #guard (runInlineCall (rProg rP)).allExprs LExpr.fullyAnnotated
 
+-- Stored type arguments give the type of a parameter that the call's arguments do not determine,
+-- so no opaque type is declared.
+/--
+info: program Core;
+
+procedure q<a> ()
+{
+  assume [refl]: forall y : a :: y == y;
+};
+procedure Caller ()
+{
+  $__inline1_q$inlined: {
+    assume [$__inline1_refl]: forall y : int :: y == y;
+  }
+};
+-/
+#guard_msgs in
+#eval IO.println (toString (runInlineCall (qTyArgsProg qP (some [.forAll [] .int]))))
+#guard (runInlineCall (qTyArgsProg qP (some [.forAll [] .int]))).allExprs LExpr.fullyAnnotated
+
+-- A stored type that still contains a generated type variable is not used: `b` gets an opaque
+-- type, while `a` is read from the stored type arguments.
+/--
+info: program Core;
+
+type $__inlinety_0;
+procedure r<a, b> (x : a)
+{
+  assert [refl]: x == x;
+  assume [reflB]: forall y : b :: y == y;
+};
+procedure Caller ()
+{
+  $__inline1_r$inlined: {
+    var $__inline1_x : int := 7;
+    assert [$__inline1_refl]: $__inline1_x == $__inline1_x;
+    assume [$__inline1_reflB]: forall y : $__inlinety_0 :: y == y;
+  }
+};
+-/
+#guard_msgs in
+#eval IO.println (toString (runInlineCall
+  (rTyArgsProg rP (some [.forAll [] .int, .forAll [] (.ftvar "$__ty3")]))))
+#guard (runInlineCall
+  (rTyArgsProg rP (some [.forAll [] .int, .forAll [] (.ftvar "$__ty3")]))).allExprs
+  LExpr.fullyAnnotated
+
+-- Stored type arguments that are not one entry per type parameter are ignored, and the call's
+-- arguments determine the types as for a program that was not type-checked.
+/--
+info: program Core;
+
+type $__inlinety_0;
+procedure r<a, b> (x : a)
+{
+  assert [refl]: x == x;
+  assume [reflB]: forall y : b :: y == y;
+};
+procedure Caller ()
+{
+  $__inline1_r$inlined: {
+    var $__inline1_x : int := 7;
+    assert [$__inline1_refl]: $__inline1_x == $__inline1_x;
+    assume [$__inline1_reflB]: forall y : $__inlinety_0 :: y == y;
+  }
+};
+-/
+#guard_msgs in
+#eval IO.println (toString (runInlineCall (rTyArgsProg rP (some [.forAll [] .bool]))))
+#guard (runInlineCall (rTyArgsProg rP (some [.forAll [] .bool]))).allExprs LExpr.fullyAnnotated
+
+-- A stored type that disagrees with the type the call's argument gives is an error: `a` is
+-- stored as `bool`, but the argument `7` is an `int`.
+/--
+info: Procedure inlining requires every call to be well-formed: the call to r stores a = bool,
+but its arguments give a = int
+-/
+#guard_msgs in
+#eval match tryInlineCall (rTyArgsProg rP (some [.forAll [] .bool, .forAll [] .int])) with
+  | .ok _ => IO.println "no error"
+  | .error e => IO.println e.message
+
+-- Stored type arguments with more entries than type parameters are ignored likewise.
+/--
+info: program Core;
+
+type $__inlinety_0;
+procedure r<a, b> (x : a)
+{
+  assert [refl]: x == x;
+  assume [reflB]: forall y : b :: y == y;
+};
+procedure Caller ()
+{
+  $__inline1_r$inlined: {
+    var $__inline1_x : int := 7;
+    assert [$__inline1_refl]: $__inline1_x == $__inline1_x;
+    assume [$__inline1_reflB]: forall y : $__inlinety_0 :: y == y;
+  }
+};
+-/
+#guard_msgs in
+#eval IO.println (toString (runInlineCall
+  (rTyArgsProg rP (some [.forAll [] .int, .forAll [] .bool, .forAll [] .int]))))
+#guard (runInlineCall
+  (rTyArgsProg rP (some [.forAll [] .int, .forAll [] .bool, .forAll [] .int]))).allExprs
+  LExpr.fullyAnnotated
+
 /--
 info: program Core;
 
@@ -782,7 +939,7 @@ type $__inlinety_1;
 procedure r<a, b> (x : a)
 {
   assert [refl]: x == x;
-  assume [reflB]: forall y : (b) :: y == y;
+  assume [reflB]: forall y : b :: y == y;
 };
 procedure Caller ()
 {
@@ -827,7 +984,8 @@ end CallInstanceTests
 
 A program may declare a type named like the opaque type inlining gives a callee type parameter
 that the call does not determine. Here the axiom makes `$__inlinety_0` a singleton, under which
-the assertion of `Q` holds, so the inlined assertion must be at another type. -/
+the assertion of `Q` holds, so the inlined assertion must be at another type. The checker rejects
+such a call, so the pass is run directly on the unchecked program. -/
 section InlineAvoidsTypeNames
 open Core.CallFixtures Core.TestUtil
 
@@ -843,7 +1001,7 @@ type $__inlinety_0;
 axiom [one]: forall x : $__inlinety_0 :: forall y : $__inlinety_0 :: x == y;
 procedure Q<a> ()
 {
-  assert [qa]: forall x : (a) :: forall y : (a) :: x == y;
+  assert [qa]: forall x : a :: forall y : a :: x == y;
 };
 procedure P ()
 {
@@ -853,6 +1011,13 @@ procedure P ()
 };
 -/
 #guard_msgs in
+#eval IO.println (toString (runInlineCall capturedInlineTypePgm).stripMetaData)
+
+/--
+info: Procedure 'P': the call to 'Q' does not determine one of its type
+parameters
+-/
+#guard_msgs (whitespace := lax) in
 #eval match Core.typeCheck .quiet capturedInlineTypePgm with
   | .ok p => IO.println (toString (runInlineCall p).stripMetaData)
   | .error e => IO.println e.message
@@ -863,22 +1028,18 @@ def capturedLocalInlineTypePgm : Program :=
   capturedLocalTypeProg "$__inlinety_0" []
     [Statement.assert "qa" (singletonAll (tv "a")) .empty]
 
-/--
-info:
-Obligation: qa
-Property: assert
-Result: ❌ fail
+-- As in CallElim.lean, the printed program cannot be shown, so the output is checked directly.
+#guard ((toString (runInlineCall capturedLocalInlineTypePgm).stripMetaData).splitOn
+  "forall x : $__inlinety_1 ::").length > 1
 
-Obligation: $__inline1_qa
-Property: assert
-Result: ❓ unknown
+/--
+info: Procedure 'P': the call to 'Q' does not determine one of its type
+parameters
 -/
-#guard_msgs in
+#guard_msgs (whitespace := lax) in
 #eval match Core.typeCheck .quiet capturedLocalInlineTypePgm with
-  | .ok p =>
-    EIO.toIO (fun s => IO.userError s)
-      (Core.verifyProgram (runInlineCall p) { Core.VerifyOptions.default with verbose := .quiet })
-  | .error e => throw (IO.userError e.message)
+  | .ok p => IO.println (toString (runInlineCall p).stripMetaData)
+  | .error e => IO.println e.message
 
 end InlineAvoidsTypeNames
 end

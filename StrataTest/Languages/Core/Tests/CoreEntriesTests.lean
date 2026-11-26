@@ -25,11 +25,10 @@ of entries. These tests pin what they are on small programs.
 
 - A procedure entry is one of mainline's (`IsCoreEntry`): its factory is
   `Program.factoryBeforeProcedure`, Core's factory with the functions declared before the
-  procedure. A procedure declared after a datatype is found, and the factory its entries
-  must have is that one, but it has none of the functions generated for the datatype. A
-  body that evaluates the datatype's constructors or testers gets stuck there, so deductive
-  verification says nothing about the assertions after it. Follow-up work adds those
-  functions.
+  procedure and the functions generated for the datatypes declared before it. A procedure
+  declared after a datatype is found, and the factory its entries must have holds the
+  datatype's constructors, testers and destructors, as the runtime factory over Core's
+  does.
 - The declarations entry walks the declarations in order (`declsLang`), assuming each axiom
   and `distinct` declaration and asserting each lemma. Obligation extraction walks them the
   same way.
@@ -50,10 +49,10 @@ procedure P() spec { ensures true; } { assert [a]: true; };
   == some "P"
 #guard ((translateWithMetaData dtBeforeProc).declsBeforeProcedure "P").length == 1
 
--- The factory a procedure entry of `P` must have (`factoryBeforeProcedure`) has no function
--- generated for the datatype; the runtime factory over Core's has them.
-#guard !(((translateWithMetaData dtBeforeProc).factoryBeforeProcedure "P").toArray.any
-  (·.name.name == "Some"))
+-- The factory a procedure entry of `P` must have (`factoryBeforeProcedure`) has the
+-- functions generated for the datatype, as the runtime factory over Core's has them.
+#guard ((translateWithMetaData dtBeforeProc).factoryBeforeProcedure "P").toArray.any
+  (·.name.name == "Some")
 #guard (Core.Specification.Analysis.runtimeFactoryOf Core.Factory
   ((translateWithMetaData dtBeforeProc).declsBeforeProcedure "P")).toArray.any
   (·.name.name == "Some")
@@ -149,23 +148,16 @@ distinct [dist]: [c, d];
 lemma [late]: !(c == d);
 #end
 
--- The premise theorems take: it fails on the first program and holds on the second.
-#guard !Core.Specification.Analysis.Program.distinctsBeforeLemmasB
-  (translateWithMetaData distinctAfterLemmaPgm)
-#guard Core.Specification.Analysis.Program.distinctsBeforeLemmasB
-  (translateWithMetaData distinctBeforeLemmaPgm)
-
 /-- `Core.verify`'s verdict on each obligation of `p`. -/
 private def verdicts (p : StrataDDM.Program) : IO Unit := do
   let results ← Strata.Core.verify p (options := .quiet)
   for r in results do
     IO.println s!"{r.obligation.label}: {if r.isSuccess then "pass" else "not proved"}"
 
--- A KNOWN WRONG verdict: `Core.verify` hoists the later `distinct` into `early`'s obligation
--- and reports it proved, although the language reference checks a lemma only under the
--- declarations before it, and a model with `c = d` falsifies `early` there. When
--- `Core.verify` scopes `distinct` declarations by position, this becomes `not proved`.
-/-- info: early: pass -/
+-- `Core.verify` scopes `distinct` declarations by position: `early` is checked under the
+-- declarations before it only, as the language reference says, and a model with `c = d`
+-- falsifies it there.
+/-- info: early: not proved -/
 #guard_msgs in
 #eval verdicts distinctAfterLemmaPgm
 

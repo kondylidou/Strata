@@ -23,8 +23,8 @@ import Strata.DL.Imperative.InterpreterConfigProps
 
 Lemmas about the definitions of `InterpreterCall.lean`:
 * reduction lemmas for `stepCmd` and `runCallInterp` (`stepCmd_cmd`, `runCallInterp_eq`);
-* path feasibility (`pathFeasible_of_subset`, `pathFeasible_cons`) and genuineness as a trace
-  property (`genuine_iff`);
+* path feasibility (`pathFeasible_of_subset`, `pathFeasible_cons`, its decision procedure
+  `pathFeasibleB_iff`) and genuineness as a trace property (`genuine_iff`);
 * the executable call helpers against the reference store relations
   (`readVarList_of_readValues`, `readValues_of_readVarList`, `readVarList_defined`,
   `bindPositional_of_updateStates`, `updateStates_bindPositional`,
@@ -35,7 +35,8 @@ Lemmas about the definitions of `InterpreterCall.lean`:
   `storeTyped_callEntryStore`);
 * the runtime call marshalling against its semantic image (`readVarList_absStore`,
   `readVarList_absStore_of_denoting`, `absStore_bindPositional`, `denoting_bindPositional`,
-  `absStore_withOldSnapshotsV`, `callEntryStore_abs`, `rDefaultAssertEvents_abs`);
+  `absStore_withOldSnapshotsV`, `callEntryStore_abs`, `rDefaultAssertEvents_abs`,
+  `rAssumeEvents_abs`);
 * `targetReached_of_assertFailureHalt`: the halting predicate fires only on target-id matches. -/
 
 /-! ## Stepper reductions -/
@@ -47,6 +48,7 @@ variable {P : PureExpr}
 section Stepper
 variable [DecidableEq P.Ident] [HasOldIdent P]
   {Hdr : Type} [DecidableEq Hdr] [Inhabited Hdr] [ProcedureHeader P Hdr]
+  [ProcedureTypeInstantiation P Hdr]
 variable [HasBool P] [DecidableEq P.Expr] [InterpLang P] [HasFvar P]
 
 /-- The call-aware stepper on a base command runs `stepBaseCmdStore` and returns a `.terminal`
@@ -54,15 +56,25 @@ variable [HasBool P] [DecidableEq P.Expr] [InterpLang P] [HasFvar P]
 @[simp] theorem stepCmd_cmd {m : Type → Type} [Monad m] [InterpEffects P m]
     [MonadExcept StopReason m] (π : String → Option (Procedure P (CmdExt P) Hdr)) (depth : Nat)
     (fuel : Nat) (env : IEnv P) (base : Cmd P) :
-    stepCmd (m := m) π depth fuel env (.cmd base)
+    stepCmd (m := m) π .contract depth fuel env (.cmd base)
       = (stepBaseCmdStore fuel env.factory env.store base >>=
-          fun store => pure (.terminal { env with store := store })) := by rw [stepCmd]
+          fun store => pure (.terminal { env with store := store })) := by rw [stepCmd, stepCmdWith]; rfl
 
-/-- The call-aware driver `runCallInterp` is `runInterp` over the stepper `stepCmd π d`. -/
+omit [DecidableEq P.Ident] [HasOldIdent P] [HasBool P] [DecidableEq P.Expr] [HasFvar P]
+    [ProcedureHeader P Hdr] in
+/-- A `CmdExt` command is never an extension command: its view is a base command or a call. -/
+theorem CmdExt.view_ne_ext {m : Type → Type} (c : CmdExt P)
+    (run : Nat → IEnv P → m (ExtStep P (CmdExt P) Hdr)) :
+    CmdExt.view (Hdr := Hdr) (m := m) c ≠ CmdView.ext run := by
+  cases c <;> simp [CmdExt.view]
+
+/-- The call-aware driver `runCallInterp` is `runInterp` over the stepper `stepCmd π .contract d`.
+    -/
 @[simp] theorem runCallInterp_eq {m : Type → Type} [Monad m] [InterpEffects P m]
     [MonadExcept StopReason m] (π : String → Option (Procedure P (CmdExt P) Hdr)) (fuel : Nat)
     (cfg : IConfig P (CmdExt P)) (d : Nat) :
-    runCallInterp (m := m) π fuel cfg d = runInterp (stepCmd π d) fuel cfg := rfl
+    runCallInterp (m := m) π .contract fuel cfg d = runInterp (stepCmd π .contract d) fuel cfg :=
+        rfl
 
 end Stepper
 end Calls
@@ -83,6 +95,15 @@ omit [DecidableEq P.Expr] in
 theorem pathFeasible_of_subset {fuel : Nat} {evs evs' : List (IEvent P)}
     (hsub : evs' ⊆ evs) (h : PathFeasible fuel evs) : PathFeasible fuel evs' :=
   fun _ => h _ ∘ @hsub _
+
+omit [DecidableEq P.Expr] in
+/-- `PathFeasibleB` decides `PathFeasible`: it accepts `evs` exactly when every `.assume` event
+    of `evs` evaluates under the bounded evaluator to `tt` up to metadata. -/
+theorem pathFeasibleB_iff {fuel : Nat} {evs : List (IEvent P)} :
+    PathFeasibleB fuel evs = true ↔ PathFeasible fuel evs := by
+  simp only [PathFeasibleB, PathFeasible, List.all_eq_true]
+  exact ⟨fun h a ha => beq_iff_eq.1 (h _ ha), fun h ev hev => by
+    cases ev <;> simp only [beq_iff_eq] <;> first | exact h _ hev | rfl⟩
 
 omit [DecidableEq P.Expr] in
 /-- `e :: evs` is path-feasible (every `.assume` event evaluates under the bounded evaluator to
@@ -108,6 +129,7 @@ variable {P : PureExpr}
 variable [HasBool P] [DecidableEq P.Expr] [InterpLang P]
 variable [DecidableEq P.Ident] [HasOldIdent P] [HasFvar P]
   {Hdr : Type} [DecidableEq Hdr] [Inhabited Hdr] [ProcedureHeader P Hdr]
+  [ProcedureTypeInstantiation P Hdr]
 
 /-- A counterexample is genuine (its strict call-aware replay returns the `.genuine` verdict) iff
     the replay's trace contains an event on which the halting predicate `assertFailureHalt`
@@ -115,7 +137,7 @@ variable [DecidableEq P.Ident] [HasOldIdent P] [HasFvar P]
 theorem genuine_iff (π : String → Option (Procedure P (CmdExt P) Hdr)) (target : AssertId P)
     (fuel : Nat) (cex : CexA P (CmdExt P)) (d : Nat) :
     genuine π target fuel cex d ↔
-        ∃ ev ∈ (runReplayRun (runCallInterp (m := ReplayM P) π fuel cex.cfg d)
+        ∃ ev ∈ (runReplayRun (runCallInterp (m := ReplayM P) π .contract fuel cex.cfg d)
                   { oracleConfig := .strict }
                   cex.oracle).2.traceRev,
           assertFailureHalt target fuel ev = true := runReplay_genuine_iff ..
@@ -195,7 +217,7 @@ variable {P : PureExpr} [DecidableEq P.Ident] [HasOldIdent P] {Hdr : Type} [Deci
 /-- If the reference relation `InitCallFrame` builds the callee frame `σAO` from the input and
     output-only values, then `σAO` is `callEntryStore` of them, and the input and output-only
     formals are as many as their values. -/
-theorem callEntryStore_of_initCallFrame (p : Procedure P (CmdExt P) Hdr)
+theorem callEntryStore_of_initCallFrame {C : Type} (p : Procedure P C Hdr)
     (inputVals outOnlyVals : List P.Val) (σAO : SemanticStore P)
     (h : InitCallFrame p inputVals outOnlyVals σAO) :
     (ProcedureHeader.inputParams (P := P) p.header).length = inputVals.length
@@ -312,7 +334,7 @@ variable {P : PureExpr} [DecidableEq P.Ident] [HasOldIdent P] {Hdr : Type} [Deci
 /-- When the input and output-only formals are pairwise distinct and as many as their values, the
     engine's callee frame `callEntryStore` is a frame the reference relation `InitCallFrame`
     builds. -/
-theorem initCallFrame_callEntryStore (p : Procedure P (CmdExt P) Hdr)
+theorem initCallFrame_callEntryStore {C : Type} (p : Procedure P C Hdr)
     (inputVals outOnlyVals : List P.Val)
     (hin : (ProcedureHeader.inputParams (P := P) p.header).length = inputVals.length)
     (hout : (outputOnlyParams (P := P) p.header).length = outOnlyVals.length)
@@ -352,7 +374,7 @@ variable {P : PureExpr} [HasBoolOps P] [DecidableEq P.Ident] {Hdr : Type} [Decid
     [Inhabited Hdr] [ProcedureHeader P Hdr]
 
 /-- A positional bind of values keeps a store value-only (every entry a value of the factory). -/
-private theorem wellFormedStore_bindPositional {f : P.Factory} :
+theorem wellFormedStore_bindPositional {f : P.Factory} :
     ∀ (σ : SemanticStore P) (names : List P.Ident) (vals : List P.Val),
       WellFormedStore σ f → (∀ v ∈ vals, HasVal.value f v) →
       WellFormedStore (bindPositional σ names vals) f := fun σ ns vs => by
@@ -405,7 +427,7 @@ variable {P : PureExpr} [HasBoolOps P] [DecidableEq P.Ident] [HasOldIdent P] {Hd
 
 /-- The callee frame `callEntryStore` built from values is value-only (every entry a value of the
     factory). -/
-theorem wellFormedStore_callEntryStore {f : P.Factory} (p : Procedure P (CmdExt P) Hdr)
+theorem wellFormedStore_callEntryStore {f : P.Factory} {C : Type} (p : Procedure P C Hdr)
     (inputVals outOnlyVals : List P.Val)
     (hin : ∀ v ∈ inputVals, HasVal.value f v)
     (hout : ∀ v ∈ outOnlyVals, HasVal.value f v) :
@@ -482,7 +504,7 @@ variable {P : PureExpr} [HasBoolOps P] [DecidableEq P.Ident] [HasOldIdent P] {Hd
 
 /-- The callee frame `callEntryStore` is typed (every entry is a value of some type) when its
     input and output-only values are. -/
-theorem storeTyped_callEntryStore {f : P.Factory} (p : Procedure P (CmdExt P) Hdr)
+theorem storeTyped_callEntryStore {f : P.Factory} {C : Type} (p : Procedure P C Hdr)
     (inputVals outOnlyVals : List P.Val)
     (hin : ∀ v ∈ inputVals, ∃ ty, HasVal.valueOfTy f v ty)
     (hout : ∀ v ∈ outOnlyVals, ∃ ty, HasVal.valueOfTy f v ty) :
@@ -515,6 +537,15 @@ theorem rDefaultAssertEvents_abs (F : P.Factory) (σ : RStore P)
   congr
   funext ⟨_, _⟩
   split <;> rfl
+
+/-- The runtime assume events of `checks` at a runtime store abstract to the assumption events of
+    `checks` at the store's image. -/
+theorem rAssumeEvents_abs (F : P.Factory) (σ : RStore P)
+    (checks : ListMap String (Check P)) :
+    (rAssumeEvents (InterpLang.rfactory F) σ checks).map (REvent.abs F) =
+      assumeEvents F (InterpLang.absStore F σ) checks := by
+  simp only [rAssumeEvents, assumeEvents, List.map_map]
+  rfl
 
 /-- A successful read of names in the image of a runtime store reads runtime values that denote
     the values read. -/
@@ -590,7 +621,7 @@ theorem absStore_withOldSnapshotsV {F : P.Factory} (s : List P.Ident) (σ : RSto
 /-- The callee frame built from runtime values that denote the input and output-only values
     stands for the frame built from those values, and denotes. -/
 theorem callEntryStore_abs {Hdr : Type} [DecidableEq Hdr] [Inhabited Hdr] [ProcedureHeader P Hdr]
-    {F : P.Factory} (p : Procedure P (CmdExt P) Hdr)
+    {F : P.Factory} {C : Type} (p : Procedure P C Hdr)
     {rs ros : List P.Expr} {vs vos : List P.Val} (h1 : List.Rel₂ (InterpLang.Denotes F) rs vs)
     (h2 : List.Rel₂ (InterpLang.Denotes F) ros vos) :
     InterpLang.absStore F (callEntryStore p rs ros) = callEntryStore p vs vos ∧

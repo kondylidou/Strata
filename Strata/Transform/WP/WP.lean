@@ -341,6 +341,20 @@ abbrev WM (P : PureExpr) [DecidableEq P.Ident] [BEq P.Ident] [LawfulBEq P.Ident]
 /-- `κ ⟹ a`. -/
 @[expose] def kImp (κ : RE P) (a : WExpr P) : WExpr P := kIte κ a (.lit true)
 
+/-- `κ ⟹ a` as `ite(¬¬κ, a, ¬¬¬κ)`, the form of a marker assumption (`WPOps.keepsTrueAssume`),
+    from which the model check of the marker reads its reach condition (`Core.markerGuards`).
+    The form has to survive the simplifications after WP for that condition to reach the
+    obligation: its arms differ even when `a` is `true`, so it does not fold to one arm, and its
+    condition is not a bare variable, so no rewrite narrows its arms by the value of the
+    condition. -/
+@[expose] def kMarkImp (κ : RE P) (a : WExpr P) : WExpr P :=
+  .ite (kExpr κ).not.not a (kExpr κ).not.not.not
+
+/-- The assumption `a` labelled `l` under the reach context `κ`: `kMarkImp κ a` for a marker
+    assumption (`WPOps.keepsTrueAssume`), `kImp κ a` for any other. -/
+@[expose] def kAssume (l : String) (κ : RE P) (a : WExpr P) : WExpr P :=
+  if WPOps.keepsTrueAssume (P := P) l then kMarkImp κ a else kImp κ a
+
 /-- Make the context `κ` equal `X` (`X` implies the enclosing context of `κ`). -/
 @[expose] def setReach (κ : RE P) (X : WExpr P) : Rope (WItem P) :=
   match κ with
@@ -386,12 +400,24 @@ abbrev WM (P : PureExpr) [DecidableEq P.Ident] [BEq P.Ident] [LawfulBEq P.Ident]
   | some s => s < t
   | none => false
 
+/-- Does the emitted rest read the variable an `init x` declares: is its WP name live? -/
+@[expose] def readLater (st : WSt P) (x : P.Ident) : Bool :=
+  match st.nm[x]? with
+  | some n => st.live.contains n
+  | none => !st.taken.contains x && st.live.contains x
+
+/-- Is an `init x` emitted, `f` telling whether an obligation follows it: when one does, or
+    when the emitted rest reads the variable it declares. -/
+@[expose] def keepInit (x : P.Ident) : Bool → WM P Bool
+  | true => pure true
+  | false => do pure (readLater (← get) x)
+
 mutual
 /-- The WP traversal of a statement under reach context `κ` at block depth `d`; `f`: an
     obligation follows it. -/
 @[expose] def wpStmt (κ : RE P) (d : Nat) (f : Bool) : PStmt P → WM P (WRes P)
   | .cmd (.cmd (.init x ty (.det e) _)) => do
-    if !f then return {}
+    if !(← keepInit x f) then return {}
     let (we, rd) ← wRen e
     let n ← wDecl x
     modify fun st => { st with tys := st.tys.insert n ty }
@@ -406,7 +432,7 @@ mutual
     liveAdd (rd ++ RE.vars κ)
     return { out := out, R := Std.HashSet.ofList rd }
   | .cmd (.cmd (.init x ty .nondet _)) => do
-    if !f then return {}
+    if !(← keepInit x f) then return {}
     let n ← wDecl x
     modify fun st => { st with tys := st.tys.insert n ty }
     liveDel n
@@ -435,7 +461,7 @@ mutual
     if !f then return {}
     let (wa, rd) ← wRen a
     liveAdd (rd ++ RE.vars κ)
-    return { out := .one (.assume l (kImp κ wa) md), R := Std.HashSet.ofList rd }
+    return { out := .one (.assume l (kAssume l κ wa) md), R := Std.HashSet.ofList rd }
   | .cmd (.cmd (.assert l e md)) => do
     let (we, rd) ← wRen e
     liveAdd (rd ++ RE.vars κ)
@@ -448,7 +474,7 @@ mutual
     let r := match κ with | .top => none | κ => some κ
     return { out := .one (.obls r [(true, l, we, md)]), sk := [.obl l],
              R := Std.HashSet.ofList rd, hasObl := true }
-  | .cmd (.call p _ _) => throw s!"WP: call to '{p}' (run callElim first)"
+  | .cmd (.call p _ _ _) => throw s!"WP: call to '{p}' (run callElim first)"
   | .typeDecl _ _ => pure {}
   | .loop _ _ _ _ _ => throw "WP: loop (run loopElim first)"
   | .ite .nondet _ _ _ => throw "WP: nondeterministic guard (run nondetElim first)"

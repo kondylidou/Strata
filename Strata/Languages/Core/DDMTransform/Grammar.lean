@@ -230,6 +230,10 @@ fn str_replace (s : string, t : string, u : string) : string => "str.replace" "(
 fn str_at (s : string, i : int) : string => "str.at" "(" s ", " i ")";
 fn str_lt (s : string, t : string) : bool => "str.lt" "(" s ", " t ")";
 fn str_le (s : string, t : string) : bool => "str.le" "(" s ", " t ")";
+fn str_to_code (s : string) : int => "str.to_code" "(" s ")";
+fn str_from_code (n : int) : string => "str.from_code" "(" n ")";
+fn str_from_int (n : int) : string => "str.from_int" "(" n ")";
+fn str_to_int (s : string) : int => "str.to_int" "(" s ")";
 // ---- Regexes ----
 fn re_allchar () : regex => "re.allchar" "(" ")";
 fn re_all () : regex => "re.all" "(" ")";
@@ -782,15 +786,21 @@ category Bindings;
 op mkBindings (bindings : CommaSepBy Binding) : Bindings => " (" bindings ")";
 
 // ---- Commands (procedures, type/const/function declarations, programs) ----
+// `opaque` before a body makes the procedure opaque (`Body.isOpaque`): its callers know it only
+// through its contract, and its body is still verified.
+category OpaqueMark;
+op opaque_mark () : OpaqueMark => "opaque ";
+
 op command_procedure (annots : Option MetadataAnn,
                       name : Ident,
                       typeArgs : Option TypeArgs,
                       @[scope(typeArgs)] b : Bindings,
                       @[scope(b)] s: Option Spec,
+                      opq : Option OpaqueMark,
                       @[scope(b)] body : Option Block) :
   Command =>
   @[prec(10)] annots:0 "procedure " name typeArgs b "\n"
-              s body ";\n";
+              s opq body ";\n";
 
 // (FIXME) Change when DDM supports type declarations like so:
 // type Array a;
@@ -1017,12 +1027,17 @@ op cfg_cmds_nil () : CFGCmds =>;
 @[scope(cmds)]
 op cfg_cmds (@[nonempty] cmds : NewlineSepBy Statement) : CFGCmds => cmds "\n";
 
-// A single CFG basic block: label, commands, transfer. The transfer is in scope
-// of the block's own commands, so its condition sees the locals they declare.
+// A single CFG basic block: optional annotations, label, commands, transfer.
+// The transfer is in scope of the block's own commands, so its condition sees
+// the locals they declare. The annotations (`@[key]`, `@[key = "s"]`,
+// `@[key = (e)]`) become the block's metadata; they are not in scope of the
+// block's commands, so an expression in them sees what is in scope at the
+// start of the block (e.g. a loop invariant on a loop-header block).
 category CFGBlock;
 @[scope(cmds)]
-op cfg_block (label : Ident, cmds : CFGCmds, @[scope(cmds)] tr : Transfer) : CFGBlock =>
-  label ":" " {" indent(2, "\n" cmds tr) "\n}";
+op cfg_block (annots : Option MetadataAnn, label : Ident, cmds : CFGCmds,
+              @[scope(cmds)] tr : Transfer) : CFGBlock =>
+  annots:0 label ":" " {" indent(2, "\n" cmds tr) "\n}";
 
 // A list of CFG blocks
 category CFGBlocks;
@@ -1050,10 +1065,11 @@ op command_cfg_procedure (annots : Option MetadataAnn,
                           typeArgs : Option TypeArgs,
                           @[scope(typeArgs)] b : Bindings,
                           @[scope(b)] s : Option Spec,
+                          opq : Option OpaqueMark,
                           @[scope(b)] body : CFGBody) :
   Command =>
   @[prec(10)] annots:0 "procedure " name typeArgs b "\n"
-              s body ";\n";
+              s opq body ";\n";
 
 #end
 

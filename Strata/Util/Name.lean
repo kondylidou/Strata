@@ -89,7 +89,8 @@ def firstUntaken (taken : String → Bool) (cand : Nat → String) : Nat → Nat
 
 /-- `base` if it is not `taken`, else the first of `base_1`, `base_2`, … that is not. The search
     stops after `fuel + 1` candidates, so it finds an untaken one when at most `fuel` names are
-    taken. -/
+    taken. The result avoids only what `taken` accepts: a caller must
+    make `taken` accept every name the new one must not clash with. -/
 def freshNameBy (taken : String → Bool) (fuel : Nat) (base : String) : String :=
   firstUntaken taken (fun k => if k = 0 then base else base ++ "_" ++ toString k) (fuel + 1) 0
 
@@ -102,19 +103,49 @@ def freshNamesBy (taken : String → Bool) (fuel : Nat) : List String → List S
     n :: freshNamesBy (fun m => taken m || m == n) (fuel + 1) rest
 
 /-- `base`, or `base_k` for the smallest `k ≥ 1` that makes it differ from
-every name in `taken`. Generated lemmas, abstracted calls and generated types
-are named this way, so that they never clash with a name of the program or
-with each other. -/
+every name in `taken`. Generated lemmas, abstracted calls
+and generated types are named this way, so that they never clash with a name of
+the program or with each other.
+
+The result avoids only the names in `taken`, so a caller must put in `taken`
+every name the new one must not clash with: for a new block label, for example,
+every jump target and the entry label as well as every block label. -/
 def freshName (taken : Std.HashSet String) (base : String) : String :=
   freshNameBy taken.contains taken.size base
 
 /-- A fresh name for each of `bases` in turn, as `freshName` picks it, avoiding
-the names in `taken` and the names picked before it. Returns the names and
-`taken` with them added. -/
+the names in `taken` and the names picked before it.
+Returns the names and `taken` with them added. As for `freshName`, `taken` must
+hold every name the new ones must not clash with. -/
 def freshNames (taken : Std.HashSet String) (bases : List String) :
     List String × Std.HashSet String :=
   let names := freshNamesBy taken.contains taken.size bases
   (names, names.foldl (fun t n => t.insert n) taken)
+
+/-! ## The namespace of generated names
+
+Names starting with `$__` (`internalMarker`) are reserved for the names Strata generates. A
+program records prefixes covering the names it has in that namespace
+(`Core.Program.usedIdentPrefixes`), so that a pass whose prefix no recorded prefix is comparable
+with (`prefixesComparable`) can tell that no name of the program starts with it. -/
+
+/-- The start of every name in the namespace reserved for generated names. -/
+@[expose] def internalMarker : String := "$__"
+
+/-- Is `n` in the namespace reserved for generated names? -/
+@[expose] def isInternal (n : String) : Bool := n.startsWith internalMarker
+
+/-- The prefix recorded for the internal name `n`: `$__` followed by the letters that follow it,
+    so `$__ty12` gives `$__ty` and `$__ndelim_ite$_0` gives `$__ndelim`. When no letter follows
+    `$__`, the character that does is kept, so `$__0` gives `$__0` rather than `$__`, which would
+    overlap every prefix. Any prefix of `n` would do; a shorter one overlaps more prefixes. -/
+@[expose] def internalPrefixOf (n : String) : String :=
+  let rest := n.toList.drop internalMarker.length
+  let letters := rest.takeWhile Char.isAlpha
+  internalMarker ++ String.ofList (if letters.isEmpty then rest.take 1 else letters)
+
+/-- Is one of `a` and `b` a prefix of the other? A name can start with both only if they are. -/
+@[expose] def prefixesComparable (a b : String) : Bool := a.startsWith b || b.startsWith a
 
 end Strata.Name
 

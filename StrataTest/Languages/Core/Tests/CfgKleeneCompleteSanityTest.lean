@@ -8,6 +8,7 @@ module
 import Strata.DL.Imperative.InterpreterCFGProps
 import Strata.Languages.Core.InterpreterCFGProps
 import Strata.Languages.Core.InterpreterKleeneProps
+import Strata.Languages.Core.ProcedureProps
 import Strata.Languages.Core.InterpreterCallComplete
 import Strata.Languages.Core.InstWellFormedSemanticsEval
 import all Strata.Languages.Core.Interpreter
@@ -24,7 +25,7 @@ import all Strata.Languages.Core.InterpreterCallSound
 import all Strata.Languages.Core.StatementSemantics
 import Strata.Languages.Core.InterpreterProps
 import Strata.DL.Imperative.InterpreterReplayTactics
-import Strata.Languages.Core.Logic.FactoryInterp
+import Strata.Languages.Core.FactoryInterp
 import Strata.Languages.Core.FactoryWF
 import Strata.Languages.Core.InterpreterDomainProps
 
@@ -68,13 +69,13 @@ private def bId : Expression.Ident := ⟨"b", ()⟩
 
 /-- The callee's CFG body: one block `e` that finishes. -/
 def wCfg : DetCFG Expression Command :=
-  { entry := "e", blocks := [("e", ⟨[], .finish md⟩)] }
+  { entry := "e", blocks := [("e", ⟨[], .finish md, .empty⟩)] }
 
 /-- The callee: no formals, no spec clauses, CFG body `wCfg`. -/
 def wProc : Procedure :=
   { header := { name := ⟨"w", ()⟩, typeArgs := [], inputs := [], outputs := [] },
     spec := { preconditions := [], postconditions := [] },
-    body := .cfg wCfg }
+    body := .cfg wCfg false }
 
 /-- The procedure table: `"w"` resolves to `wProc`. -/
 def wPi : String → Option Procedure := fun n => if n = "w" then some wProc else none
@@ -122,9 +123,9 @@ private theorem ttE_engEval (σ : SemanticStore Expression) :
     to `b1`, which finishes; `b2` finishes too. -/
 def gC : DetCFG Expression Command :=
   { entry := "b0",
-    blocks := [("b0", ⟨[.cmd (.init bId HasBool.boolTy .nondet md), .call "w" [] md],
-        .condGoto ttE "b1" "b2" md⟩),
-      ("b1", ⟨[], .finish md⟩), ("b2", ⟨[], .finish md⟩)] }
+    blocks := [("b0", ⟨[.cmd (.init bId HasBool.boolTy .nondet md), .call "w" none [] md],
+        .condGoto ttE "b1" "b2" md, .empty⟩),
+      ("b1", ⟨[], .finish md, .empty⟩), ("b2", ⟨[], .finish md, .empty⟩)] }
 
 /-- The start configuration: at block `b0` of `gC`, in `env0`. -/
 def cfgStart : ICFGConfig String Command Expression := .atBlock gC "b0" env0
@@ -141,12 +142,12 @@ private theorem cfgRun : ∃ evs final, ReflTransTrace
       (HasBool.boolIsValOfTy _).2 (HasBool.boolIsValOfTy _).2
       (coreEvaluator_WellFormedSemanticEvalVar _),
       .inr ⟨bId, HasBool.ffVal M0, rfl, by simp [SemanticStore.update], .inl ⟨_, _, rfl⟩⟩⟩))
-    (.step _ _ _ _ _ (.step_cmd (.inr (.inr ⟨"w", wProc, [], md, _, wCfg, _, _, rfl, rfl, rfl,
+    (.step _ _ _ _ _ (.step_cmd (.inr (.inr (.inl ⟨"w", none, wProc, [], md, _, wCfg, _, _, rfl, rfl, rfl,
         ⟨[], [], .eval_none, .read_none, ⟨_, _, .init_none, .init_none, rfl⟩⟩,
         .step _ _ _ _ _ (.step_admin (.fetch rfl)) (.step _ _ _ _ _ (.step_admin .finish)
           (.refl _)),
         ⟨List.nodup_nil, [], .read_none, .update_none, .nil⟩, rfl, nofun,
-        fun _ _ _ _ _ _ h _ => by cases h; rfl⟩)))
+        fun _ _ _ _ _ _ h _ => by cases h; rfl⟩))))
     (.step _ _ _ _ _ (.step_admin (.goto_true (ttE_denote _ _) (ttE_engEval _)))
     (.step _ _ _ _ _ (.step_admin (.fetch rfl))
     (.step _ _ _ _ _ (.step_admin .finish) (.refl _)))))), trivial⟩
@@ -190,10 +191,10 @@ theorem cfgComplete : ∃ (evs : List (Event Expression)) (final : CFGConfig Str
 /-- Every procedure of `wPi` is well-formed for call-aware soundness: it has no formals, and its
     CFG body has no commands. -/
 private theorem procsOk_wPi : Calls.ProcsOk wPi := by
-  intro n p h
-  simp only [wPi] at h
-  split at h <;> cases h
-  exact ⟨by decide, nofun, fun g hg => by cases hg; exact CFG.allCmds_of_mem (by simp [wCfg])⟩
+  refine Procedure.forall_typeInstantiatedCallee_of_typeArgs_nil (fun n p h => ?_) (fun n p h => ?_)
+  all_goals simp only [wPi] at h; split at h <;> cases h
+  · rfl
+  · exact ⟨by decide, nofun, fun g _ hg => by cases hg; exact CFG.allCmds_of_mem (by simp [wCfg])⟩
 
 /-- Every command of the caller CFG `gC` is a well-formed call site. -/
 private theorem allCmds_gC : gC.allCmds (Calls.CmdCallOk wPi) := by
@@ -227,17 +228,17 @@ theorem cfgSound : ∃ (fuel d : Nat) (final' : ICFGConfig String Command Expres
 /-! ## A Kleene program -/
 
 /-- The start configuration: `loop { call w() }` in `env0`. -/
-def kStart : IKleeneConfig Expression Command := .stmt (.loop (.cmd (.call "w" [] md))) env0
+def kStart : IKleeneConfig Expression Command := .stmt (.loop (.cmd (.call "w" none [] md))) env0
 
 /-- The call `call w()` from any caller store `σ`: the callee's CFG body halts at once and the
     call leaves the store unchanged. -/
 private theorem wCallArm (σ : SemanticStore Expression) (o : List Expression.Val) :
-    Calls.OracleCmdAt wPi 1 M0 σ (.call "w" [] md) σ [] o o :=
-  .inr (.inr ⟨"w", wProc, [], md, _, wCfg, _, _, rfl, rfl, rfl,
+    Calls.OracleCmdAt wPi 1 M0 σ (.call "w" none [] md) σ [] o o :=
+  .inr (.inr (.inl ⟨"w", none, wProc, [], md, _, wCfg, _, _, rfl, rfl, rfl,
     ⟨[], [], .eval_none, .read_none, ⟨_, _, .init_none, .init_none, rfl⟩⟩,
     .step _ _ _ _ _ (.step_admin (.fetch rfl)) (.step _ _ _ _ _ (.step_admin .finish) (.refl _)),
     ⟨List.nodup_nil, [], .read_none, .update_none, .nil⟩, rfl, nofun,
-    fun _ _ _ _ _ _ h _ => by cases h; rfl⟩)
+    fun _ _ _ _ _ _ h _ => by cases h; rfl⟩))
 
 /-- The oracle-reading reference run of `kStart`: the loop reads `ttVal` and runs its body (the
     call) once in its own block, then reads `ffVal` and stops; the choices it resolves are
@@ -409,11 +410,11 @@ private theorem cfgRunEng : ∃ evs final, StepCFGEngStarE Expression
     (.step _ _ _ _ _ (.step_cmd (.inl ⟨_, rfl,
       .eval_init_nondet (v := HasBool.ffVal M0) (env0_abs_none _) ⟨rfl, rfl⟩
       (HasBool.boolIsValOfTy _).2 (coreEvaluator_WellFormedSemanticEvalVar _)⟩))
-    (.step _ _ _ _ _ (.step_cmd (.inr ⟨"w", wProc, [], md, _, _, _, rfl, rfl,
+    (.step _ _ _ _ _ (.step_cmd (.inr (.inl ⟨"w", none, wProc, [], md, _, _, _, rfl, rfl, rfl,
         ⟨[], [], .eval_none, .read_none, ⟨_, _, .init_none, .init_none, rfl⟩⟩,
         ⟨_, .step _ _ _ _ _ (.fetch rfl) (.step _ _ _ _ _ .finish (.refl _)), rfl⟩,
         ⟨List.nodup_nil, [], .read_none, .update_none, .nil⟩, rfl, nofun,
-        fun _ _ _ _ _ _ h _ => by cases h; rfl⟩))
+        fun _ _ _ _ _ _ h _ => by cases h; rfl⟩)))
     (.step _ _ _ _ _ (.goto_true (ttE_denote _ _) (ttE_engEval _))
     (.step _ _ _ _ _ (.fetch rfl)
     (.step _ _ _ _ _ .finish (.refl _)))))), trivial⟩
@@ -435,7 +436,7 @@ theorem cfgCompleteE : ∃ (evs : List (Event Expression))
 
 /-- The Kleene start configuration: `choice { call w() } { call w() }` in `env0`. -/
 def kChoiceStart : IKleeneConfig Expression Command :=
-  .stmt (.choice (.cmd (.call "w" [] md)) (.cmd (.call "w" [] md))) env0
+  .stmt (.choice (.cmd (.call "w" none [] md)) (.cmd (.call "w" none [] md))) env0
 
 /-- **`Core.runCoreInterpKleene_completeE` applies.**  At `obsFF`, with every premise discharged
     (`EmitTotal`, `ChooseResolves` of `ffRecord`), the engine-realizable run of `kChoiceStart`
@@ -449,12 +450,12 @@ theorem kleeneCompleteE : ∃ (evs : List (Event Expression))
         obsFF.run (runCoreInterpKleene wPi fuel kChoiceStart d) () [] = (.ok final', st'))
       ∧ obsFF.TraceExt M0 [] st' evs := by
   have hcall : StepKleeneEngStarE ffRecord (Calls.EvalCommandEngAtE wPi ffRecord 1)
-      (.stmt (.cmd (.call "w" [] md)) (env0.abs M0)) _ _ :=
-    .step _ _ _ _ _ (.step_cmd (Or.inr ⟨"w", wProc, [], md, _, _, _, rfl, rfl,
+      (.stmt (.cmd (.call "w" none [] md)) (env0.abs M0)) _ _ :=
+    .step _ _ _ _ _ (.step_cmd (Or.inr (.inl ⟨"w", none, wProc, [], md, _, _, _, rfl, rfl, rfl,
       ⟨[], [], .eval_none, .read_none, ⟨_, _, .init_none, .init_none, rfl⟩⟩,
       ⟨_, .step _ _ _ _ _ (.fetch rfl) (.step _ _ _ _ _ .finish (.refl _)), rfl⟩,
       ⟨List.nodup_nil, [], .read_none, .update_none, .nil⟩, rfl, nofun,
-      fun _ _ _ _ _ _ h _ => by cases h; rfl⟩)) (.refl _)
+      fun _ _ _ _ _ _ h _ => by cases h; rfl⟩))) (.refl _)
   have hstar : StepKleeneEngStarE ffRecord (Calls.EvalCommandEngAtE wPi ffRecord 1)
       (kChoiceStart.abs M0) _ _ :=
     .step _ _ _ _ _ (.step_choice (v := HasBool.ffVal M0) ⟨rfl, rfl⟩ (.inr rfl))

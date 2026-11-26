@@ -15,6 +15,9 @@ import StrataDDM.Ion
 import Strata.DL.SMT
 import Strata.DL.Lambda
 import Strata.DL.Imperative
+import Strata.DL.Str
+import Strata.DL.Util.StringGenProps
+import Strata.Languages.Core.NameManglingProps
 
 /- Utilities -/
 import Strata.Util.NameProofs
@@ -23,6 +26,7 @@ import Strata.Util.RealProps
 import Strata.Util.IonDeserializer
 import Strata.Util.Sarif
 import Strata.Util.Worklist
+import Strata.Util.WorklistProps
 
 /- Strata Languages -/
 import Strata.Languages.Core.BitVecEvalProps
@@ -30,6 +34,7 @@ import Strata.Languages.Core.IntEvalProps
 import Strata.Languages.Core.InstWellFormedSemanticsEval
 import Strata.Languages.Core.InstExprTyping
 import Strata.Languages.Core.FactoryWF
+import Strata.Languages.Core.FactoryInterp
 import Strata.Languages.Core.SeqModel
 import Strata.Languages.Core.SMTEncoderProps
 import Strata.Languages.Core.SMTEmitter
@@ -41,6 +46,9 @@ import Strata.DL.Imperative.StmtExtendCallBridge
 import Strata.Languages.Core.StmtExtendCallBridgeProps
 /- Code Transforms -/
 import Strata.Transform.CallElimCorrect
+import Strata.Transform.CFGLoopElimProps
+import Strata.Transform.CommonSubexprElimCorrect
+import Strata.Transform.CommonSubexprElimProps
 import Strata.Transform.CoreSpecification
 import Strata.Transform.CoreSpecificationProps
 import Strata.Languages.Core.Analysis.ProcedureCorrectness
@@ -51,16 +59,16 @@ import Strata.Languages.Core.Analysis.DeductiveVerificationProps
 import Strata.Languages.Core.Analysis.FragmentFactory
 import Strata.DL.Lambda.LFuncEvalSound
 import Strata.DL.Lambda.LExprRenameOps
-import Strata.Transform.MonomorphizeBasics
-import Strata.Transform.MonomorphizeWorklist
-import Strata.Transform.MonomorphizeInstances
+import Strata.Transform.MonomorphizeFunctionsProps
 import Strata.Transform.MonomorphizeFunctionsCorrect
 import Strata.Languages.Core.ProcedureProps
 import Strata.Languages.Core.ProgramProps
+import Strata.Languages.Core.NameSetsProps
 import Strata.Transform.CoreTransformProps
 import Strata.Transform.DetToKleeneCorrect
 import Strata.Transform.FunctionInlining
 import Strata.Transform.FunctionInliningProps
+import Strata.Transform.LambdaLiftCorrect
 import Strata.Transform.UnrollBoundedQuantifiersProps
 import Strata.Transform.LoopInitHoist
 import Strata.Transform.LoopInitHoistProps
@@ -76,6 +84,18 @@ import Strata.Transform.Simplify.Expr
 import Strata.Transform.Simplify.LiveSweep
 import Strata.Transform.Simplify.StmtShape
 import Strata.Transform.Simplify.DeadDefsShape
+import Strata.Transform.Simplify.Entry
+import Strata.Transform.Simplify.Precondition
+import Strata.Transform.Simplify.FoldFactory
+import Strata.Transform.Simplify.ExprCorrect
+import Strata.Transform.Simplify.StmtSim
+import Strata.Transform.Simplify.SimpRun
+import Strata.Transform.Simplify.SweepRun
+import Strata.Transform.Simplify.Compose
+import Strata.Transform.Simplify.SimpWF
+import Strata.Transform.Simplify.OutputGate
+import Strata.Transform.Simplify.EvalSoundFold
+import Strata.Transform.SimplifyCorrect
 import Strata.Transform.RecursiveFunctionAxioms
 import Strata.Transform.SpecHoareConnection
 import Strata.Transform.CoreSpecHoareConnection
@@ -90,11 +110,12 @@ import Strata.Transform.StructuredToUnstructuredPipelineCoreCorrect
 
 /- Program Logics -/
 import Strata.DL.Imperative.Logic.HoareTemplate
+import Strata.DL.Imperative.Logic.HoareTotalTemplate
 import Strata.Languages.Core.Logic.LangDefProps
-import Strata.Languages.Core.Logic.FactoryInterp
 import Strata.Languages.Core.Logic.TraceInterpUsingDenote
 import Strata.Languages.Core.Logic.TraceInterpUsingDenoteProps
 import Strata.Languages.Core.Logic.Hoare
+import Strata.Languages.Core.Logic.HoareTotal
 import Strata.Languages.Core.Logic.HoareCall
 import Strata.Languages.Core.Logic.ContractToHoareTriple
 import Strata.Languages.Core.Logic.ContractToHoareTripleProps
@@ -102,17 +123,23 @@ import Strata.Languages.Core.Logic.InterpreterHoareRelation
 
 /- Strata Languages — additional -/
 import Strata.Languages.Cortex
+import Strata.Languages.Cortex.InterpreterSound
 import Strata.Languages.Core.EntryPoint
 import Strata.Languages.Core.IncrementalSolve
 import Strata.Languages.Core.IncrementalSolveCorrect
 import Strata.Languages.Core.DeclFormulas
+import Strata.Languages.Core.ObligationExtractionProps
 import Strata.Languages.Core.ProgramFact
 import Strata.Languages.Core.ProgramFactProps
 import Strata.Languages.Core.ProgramFactSet
 import Strata.Languages.Core.ProgramFactSetProps
 import Strata.Languages.Core.PipelinePhaseProps
 import Strata.Languages.Core.VerifierProofs
+import Strata.Languages.Core.EvaluatorResultsProps
 import Strata.Languages.Core.CoreGenProps
+import Strata.Languages.Core.VerifierSlicingProofs
+import Strata.Languages.Core.WPRewritePipelineProofs
+import Strata.DL.Imperative.PathConditionHoldsProps
 import Strata.Languages.GOTO
 
 /- DDM -/
@@ -131,7 +158,9 @@ import Strata.DL.SMT.DenoteTyped
 import Strata.DL.SMT.DenoteTypedProps
 import Strata.DL.SMT.DenoteSemanticsEquiv
 import Strata.DL.SMT.DenoteTypedSMTQuery
+import Strata.DL.SMT.Lean.QueryCorrect
 import Strata.DL.SMT.SymbolProps
+import Strata.DL.SMT.VerdictReaderProps
 import Strata.DL.SMT.RegexMatchProps
 
 /- Other -/
@@ -160,19 +189,44 @@ import Strata.Transform.LoopElimCoreCorrect
 -- Inserting loop invariant checks: its over-approximation, assertion-validity and Hoare-triple
 -- proofs.
 import Strata.Transform.InsertLoopInvariantAssertsCoreCorrect
+-- Guard forwarding: its over-approximation proofs and their composition with the SSA phase and
+-- dead-definition elimination.
+import Strata.Transform.GuardFwdCoreCorrect
+-- Guard propagation: its over-approximation proof.
+import Strata.Transform.GuardPropCoreCorrect
+import Strata.Transform.GuardPropTyping
+-- The constructor fold: its over-approximation proof.
+import Strata.Transform.CtorFold
+import Strata.Transform.CtorFoldCoreCorrect
+import Strata.Transform.DefInlineCoreCorrect
+import Strata.Transform.NormLawTyped
+import Strata.Transform.DefInlineRewrite
+import Strata.Transform.DefInlineRewriteCorrect
+import Strata.Transform.WPLoop
+import Strata.Transform.WPRewriteLoop
+import Strata.Transform.WPLoopCorrect
+import Strata.Transform.WPRewriteLoopCorrect
 -- The WP and SSA phases: their properties, the failure preservation of the SSA phase, and
 -- the properties of their Core instance.
 import Strata.Transform.SSA.SSAEval
 import Strata.Transform.SSA.SSAOver
+import Strata.Transform.SSA.SSATyping
+import Strata.Transform.SSA.SSAUnassignedCorrect
 import Strata.Transform.WP.WPProps
 import Strata.Util.RopeProps
 import Strata.Util.LeftistHeapProps
 import Strata.Transform.Passive.CoreProgram
 import Strata.Transform.Passive.CoreProgramProps
+import Strata.Transform.Passive.WPFactoryProps
 import Strata.Transform.Passive.DeclObligationsCoreCorrect
 import Strata.Transform.Passive.CoreWPSSA
 import Strata.Transform.Passive.CoreWPSSAProps
 import Strata.Transform.Passive.CoreTyped
+import Strata.Transform.Passive.WellTypedProps
+import Strata.Transform.BetaReduceTyping
+import Strata.Transform.BetaReduceCorrect
+import Strata.Transform.GuardFwdTyping
+import Strata.Languages.Core.ObligationExtractionTyping
 import Strata.Transform.WP.WPCoreProgram
 import Strata.Transform.WP.WPCoreProgramProps
 import Strata.Transform.WP.WPCoreCorrect
@@ -199,6 +253,9 @@ import Strata.Transform.WP.WPCorePrefix
 import Strata.Transform.EqualitySimplificationCorrect
 import Strata.Transform.FoldAxiomsEntry
 
+-- Contextual rewriting: rewrites each goal under the facts on its path.
+import Strata.Transform.ContextualRewrite
+
 /- The monadic interpreter: the monad-generic engine, its soundness and completeness against
    the reference event semantics, Core's instantiation, the `EvalM`
    instance and its soundness and completeness, counterexample replay, and symbolic execution
@@ -213,6 +270,23 @@ import Strata.Languages.Core.InterpreterDomainProps
 import Strata.Languages.Core.InterpreterEvalSound
 import Strata.Languages.Core.FactoryEvalSoundWF
 import Strata.Languages.Core.InterpreterBridgeStatements
+-- Counterexample lifting (CEL): levels (c) model, (b) valuation, (a) run, and back-links
+-- (translations of runs across program transformations)
+import Strata.Languages.Core.Counterexample.Run
+import Strata.Languages.Core.Counterexample.BackLink
+import Strata.Languages.Core.Counterexample.ValuationToRun
+import Strata.Languages.Core.Counterexample.RunProps
+import Strata.Languages.Core.Counterexample.BackLinkChainReplayProps
+import Strata.DL.Imperative.Counterexample.RunProps
+import Strata.DL.Imperative.Counterexample.BackLinkProps
+import Strata.Languages.Core.Counterexample.ModelToValuation
+import Strata.Languages.Core.Counterexample.ModelToValuationProps
+import Strata.Languages.Core.Counterexample.ModelProps
+import Strata.Languages.Core.Counterexample.ModelAnonymousProps
+import Strata.Languages.Core.Counterexample.BackLinkRelSim
+import Strata.Languages.Core.Counterexample.BackLinkRelSimProps
+import Strata.Languages.Core.Counterexample.BackLinkExactProps
+import Strata.Languages.Core.Counterexample.BackLinkExact
 import Strata.Languages.Core.InterpreterCallComplete
 import Strata.Languages.Core.InterpreterCallSound
 import Strata.Languages.Core.InterpreterComplete
@@ -230,6 +304,7 @@ import Strata.Languages.Core.InterpreterReachProps
 import Strata.Languages.Core.InterpreterObs
 import Strata.Languages.Core.InterpreterObsProps
 import Strata.Languages.Core.InterpreterSound
+import Strata.Languages.Core.JoinValueNames
 import Strata.Languages.Core.SymExec
 import Strata.Languages.Core.PathExplorer
 import Strata.Languages.Core.PathExplorerProps
@@ -251,13 +326,17 @@ import Strata.DL.Lambda.Denote.LExprDenoteConsts
 import Strata.DL.Lambda.Denote.LExprDenoteEq
 import Strata.DL.Lambda.LExprDenoteEval
 import Strata.DL.Lambda.LExprDenoteEvalProps
+import Strata.DL.Lambda.LExprDenoteBeta
 import Strata.DL.Lambda.LExprEvalFully
 import Strata.DL.Lambda.LExprEvalFuelProps
 import Strata.DL.Lambda.LExprEvalAnnotateProps
+import Strata.DL.Lambda.LExprDenoteEvalSubst
+import Strata.DL.Lambda.LExprDenoteEvalCongr
 import Strata.DL.Lambda.Denote.LExprDenoteProps
 import Strata.DL.Lambda.Denote.LExprDenoteSubst
 import Strata.DL.Lambda.Denote.LExprDenoteTySubst
 import Strata.DL.Lambda.Denote.LExprSemanticsConsistent
+import Strata.DL.Lambda.LExprTEraseProps
 import Strata.DL.Lambda.LExprTProps
 import Strata.DL.Lambda.LExprTypeSpec
 import Strata.DL.Lambda.LExprTraversal
@@ -281,19 +360,35 @@ import Strata.Languages.Core.TypeSkolem
 import Strata.Languages.Core.WrittenTyVarScope
 import Strata.Languages.Core.Typing.Spec.ProcedureTypeSpec
 import Strata.Languages.Core.ProcedureTypeProps
+import Strata.Transform.CFGLoopElimProps
+import Strata.Transform.CFGLoopElimReplay
 import Strata.Languages.Core.Typing.Spec.DatatypeTypeSpec
 import Strata.Languages.Core.Typing.Spec.ProgramTypeSpec
 import Strata.Languages.Core.Typing.Spec.NamesWF
 import Strata.Languages.Core.Typing.Spec.TypeSpecShared
 import Strata.Languages.Core.Typing.Spec.TypingSpec
+import Strata.Languages.Core.Typing.Spec.ConfigTyping
 import Strata.Languages.Core.FactoryProps
+import Strata.Languages.Core.Typing.Props.CmdTypeProps
 import Strata.Languages.Core.Typing.Props.DatatypeTypeProps
+import Strata.Languages.Core.Typing.Props.ExprEraseProps
 import Strata.Languages.Core.Typing.Props.FactoryRegistrationProps
 import Strata.Languages.Core.Typing.Props.FunctionTypeProps
 import Strata.Languages.Core.Typing.Props.NamesWFProps
 import Strata.Languages.Core.Typing.Props.ProcSigAgreementProps
+import Strata.Languages.Core.Typing.Props.ProcedureTypeProps
+import Strata.Languages.Core.Typing.Props.ProgramTypeProps
+import Strata.Languages.Core.Typing.Props.SkolemScopeProps
+import Strata.Languages.Core.Typing.Props.SkolemizerProps
+import Strata.Languages.Core.Typing.Props.SourceExprResolveProps
+import Strata.Languages.Core.Typing.Props.StatementEraseProps
+import Strata.Languages.Core.Typing.Props.StatementTypeProps
 import Strata.Languages.Core.Typing.Props.TypeSkolemProps
 import Strata.Languages.Core.Typing.Props.TypingSpecProps
+import Strata.Languages.Core.Typing.Props.WrittenTyVarScopeProps
+import Strata.Languages.Core.Typing.Preservation.SmallStep
+import Strata.Languages.Core.Typing.Preservation.Progress
+import Strata.Languages.Core.Typing.Soundness
 import Strata.Util.Random
 
 import Strata.Examples.Embedded

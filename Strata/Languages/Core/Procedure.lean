@@ -270,22 +270,22 @@ def Procedure.Spec.updateCheckExprs
 /-- A deterministic control-flow graph over Core commands and expressions. -/
 abbrev DetCFG := Imperative.DetCFG Expression Command
 
-/-- The body of a Core procedure. An empty structured body (`structured []`)
-    represents an abstract/bodyless procedure. -/
+/-- The body of a Core procedure: structured, CFG, or `abstract` (no body). -/
 abbrev Procedure.Body := Imperative.Body Expression Command
 
 @[match_pattern] abbrev Procedure.Body.structured := @Imperative.Body.structured Expression Command
 @[match_pattern] abbrev Procedure.Body.cfg := @Imperative.Body.cfg Expression Command
+@[match_pattern] abbrev Procedure.Body.abstract := @Imperative.Body.abstract Expression Command
 
 /-- The procedure names a structured body calls; empty for a CFG body. -/
 @[simp] def Procedure.Body.calledProcedureNames : Procedure.Body → List String
-  | .structured ss => Statements.calledProcedureNames ss
-  | .cfg _ => []
+  | .structured ss _ => Statements.calledProcedureNames ss
+  | .cfg _ _ | .abstract => []
 
 /-- A Strata Core procedure: the main verification unit. A procedure is a header
     (name, type parameters, input/output signatures), a specification (contract),
-    and an optional body. An empty body makes the procedure abstract, reasoned
-    about only via its contract. -/
+    and a body. An `abstract` body makes the procedure reasoned about only via
+    its contract. -/
 abbrev Procedure := Imperative.Procedure Expression Command Procedure.Header
 
 /-- The procedure names a procedure's body calls. -/
@@ -303,23 +303,46 @@ abbrev Procedure := Imperative.Procedure Expression Command Procedure.Header
       preconditions := p.spec.preconditions.map (fun (l, c) => (l, mapCheck c))
       postconditions := p.spec.postconditions.map (fun (l, c) => (l, mapCheck c)) }
     body := match p.body with
-      | .structured ss => .structured (Statements.mapExprs f ss)
-      | .cfg c => .cfg c }
+      | .structured ss o => .structured (Statements.mapExprs f ss) o
+      | .cfg c o => .cfg c o
+      | .abstract => .abstract }
+
+/-- The assertions of the procedure's non-free preconditions, which a caller checks. -/
+@[expose] def Procedure.preconditionAsserts (p : Procedure) : List Statement :=
+  p.spec.preconditions.toList.filterMap fun (label, check) =>
+    if check.attr matches .Free then none else some (Statement.assert label check.expr check.md)
+
+/-- The procedure's contract as statements, the meaning of a call to an opaque callee: assert the
+    non-free preconditions, havoc `havocs` (with metadata `md`), then assume every postcondition. -/
+@[expose] def Procedure.contractStmts (p : Procedure) (havocs : List Expression.Ident)
+    (md : Imperative.MetaData Expression) : List Statement :=
+  p.preconditionAsserts ++ havocs.map (Statement.havoc · md) ++
+    p.spec.postconditions.toList.map fun (label, check) =>
+      Statement.assume label check.expr check.md
 
 section Collect
 
 variable {β : Type} (fe : Expression.Expr → List β) (ft : LMonoTy → List β)
 
-/-- What `fe` and `ft` collect from a procedure body, which is either a statement list or the
-    blocks of a control flow graph. -/
+/-- What `fe` and `ft` collect from a procedure body: a statement list, the blocks of a control
+    flow graph with the expressions in their metadata, or nothing for an abstract procedure. -/
 def bodyCollect (body : Procedure.Body) : List β :=
   match body with
-  | .structured ss => stmtsCollect fe ft ss
-  | .cfg c => c.blocks.flatMap fun (_, blk) =>
-      blk.cmds.flatMap (cmdCollect fe ft) ++
+  | .structured ss _ => stmtsCollect fe ft ss
+  | .cfg c _ => c.blocks.flatMap fun (_, blk) =>
+      blk.md.exprs.flatMap fe ++ blk.cmds.flatMap (cmdCollect fe ft) ++
         match blk.transfer with
         | .condGoto g _ _ _ => fe g
         | .finish _ => []
+  | .abstract => []
+
+/-- The commands of a procedure body, in order: those of its statements, or of the blocks of its
+    control flow graph; none for an abstract procedure. -/
+def bodyCmds (body : Procedure.Body) : List Command :=
+  match body with
+  | .structured ss _ => stmtsCmds ss
+  | .cfg c _ => c.blocks.flatMap fun (_, blk) => blk.cmds
+  | .abstract => []
 
 /-- What `fe` and `ft` collect from a procedure's conditions and body. -/
 def procCollect (proc : Procedure) : List β :=
@@ -329,8 +352,8 @@ def procCollect (proc : Procedure) : List β :=
 
 end Collect
 
-/-- Does every type annotation in a procedure body, including control-flow graph guards,
-    satisfy `p`? -/
+/-- Does every type annotation in a procedure body, including control-flow graph guards
+    and the expressions in block metadata, satisfy `p`? -/
 def Procedure.allBodyTys (p : LMonoTy → Bool) (body : Procedure.Body) : Bool :=
   (bodyCollect exprAnnotTys ([·]) body).all p
 
@@ -348,40 +371,85 @@ instance : Imperative.ProcedureHeader Expression Procedure.Header where
   inputParams  h := h.inputs.keys
   outputParams h := h.outputs.keys
 
-/-- Apply `fc` to every command and `fe` to every branch guard of a control-flow graph,
-    keeping its labels and shape. -/
+/-- Apply `fc` to every command, and `fe` to every branch guard and every expression of
+    the block metadata (a loop invariant), of a control-flow graph, keeping its labels
+    and shape. -/
 def DetCFG.mapCmdsGuards (cfg : DetCFG) (fc : Command → Command)
     (fe : Expression.Expr → Expression.Expr) : DetCFG :=
   { cfg with blocks := cfg.blocks.map fun (lbl, blk) =>
-      (lbl, { cmds := blk.cmds.map fc,
-              transfer := match blk.transfer with
-                | .condGoto p lt lf md => .condGoto (fe p) lt lf md
-                | .finish md => .finish md }) }
+      (lbl, { blk with
+                cmds := blk.cmds.map fc,
+                md := blk.md.mapExprs fe,
+                transfer := match blk.transfer with
+                  | .condGoto p lt lf md => .condGoto (fe p) lt lf md
+                  | .finish md => .finish md }) }
 
 def DetCFG.eraseTypes (cfg : DetCFG) : DetCFG :=
   DetCFG.mapCmdsGuards cfg Command.eraseTypes (·.eraseTypes)
+
+/-- Erase every annotation of a control-flow graph: its commands, branch guards and the loop
+    invariants in its block metadata. -/
+def DetCFG.eraseAnnots (cfg : DetCFG) : DetCFG :=
+  DetCFG.mapCmdsGuards cfg Command.eraseAnnots Lambda.LExpr.eraseTypes
+
+/-- `proc` with `f` applied to every type it mentions (its formals' types, the type annotations
+    of its contract and its body) and its type parameters replaced by `typeArgs`. -/
+def Procedure.mapTys (proc : Procedure) (f : LMonoTy → LMonoTy)
+    (typeArgs : List TyIdentifier) : Procedure :=
+  let mapChecks (cs : ListMap CoreLabel Procedure.Check) :=
+    cs.map fun p => (p.1, { p.2 with expr := mapExprTys f p.2.expr })
+  { header := { proc.header with
+      typeArgs := typeArgs,
+      inputs := proc.header.inputs.map fun p => (p.1, f p.2),
+      outputs := proc.header.outputs.map fun p => (p.1, f p.2) },
+    spec := { proc.spec with
+      preconditions := mapChecks proc.spec.preconditions,
+      postconditions := mapChecks proc.spec.postconditions },
+    body := match proc.body with
+      | .structured ss o => .structured (mapStmtsTys f ss) o
+      | .cfg c o => .cfg (DetCFG.mapCmdsGuards c (mapCmdTys f) (mapExprTys f)) o
+      | .abstract => .abstract }
 
 /-- `proc` with its type parameters renamed by `ren` throughout, as
     `renameTyArgList` does to the parameter list. -/
 def Procedure.renameTypeArgs (proc : Procedure) (ren : List (String × String)) :
     Procedure :=
-  let f := LMonoTy.subst (Subst.ofRenaming ren)
-  let renameChecks (cs : ListMap CoreLabel Procedure.Check) :=
-    cs.map fun p => (p.1, { p.2 with expr := mapExprTys f p.2.expr })
-  { header := { proc.header with
-      typeArgs := renameTyArgList ren proc.header.typeArgs,
-      inputs := proc.header.inputs.map fun p => (p.1, f p.2),
-      outputs := proc.header.outputs.map fun p => (p.1, f p.2) },
-    spec := { proc.spec with
-      preconditions := renameChecks proc.spec.preconditions,
-      postconditions := renameChecks proc.spec.postconditions },
-    body := match proc.body with
-      | .structured ss => .structured (mapStmtsTys f ss)
-      | .cfg c => .cfg (DetCFG.mapCmdsGuards c (mapCmdTys f) (mapExprTys f)) }
+  proc.mapTys (LMonoTy.subst (Subst.ofRenaming ren)) (renameTyArgList ren proc.header.typeArgs)
 
--- Only transfer metadata is stripped because command metadata (on assert,
--- assume, init, set, cover) is not included in formatted output — formatCmd
--- discards it. Transfer metadata, however, appears in CFG formatting.
+/-- Whether every type the body of `proc` declares a variable at (`init`) is a monotype.  The
+    typing rules require this (`CmdWellTyped.init_det`, `CmdHasType.init_det`), so it holds of
+    every type-checked procedure. -/
+@[expose] def Procedure.initTypesMono (proc : Procedure) : Bool :=
+  (match proc.body with
+    | .structured ss _ => Imperative.Block.initTypes ss
+    | .cfg c _ => Imperative.DetCFG.initTypes c
+    | .abstract => []).all LTy.isMonoType
+
+/-- `proc` instantiated at the type arguments `tys` of a call: each type parameter is replaced
+    throughout by its type argument, position by position, and the result has no type
+    parameters.  A monomorphic procedure is its own instance at `[]`.  `none` when `tys` has
+    the wrong length or holds a type that is not a monotype, and, for a polymorphic procedure,
+    when its body declares a variable at a quantified type (`initTypesMono`).  With every type
+    of the procedure a monotype, the substitution has no binder to go under, so it is exact for
+    any monotypes `tys`, ground or not; under a quantified `init` type it would substitute
+    bound variables and could capture a variable of `tys`.  The typing rules allow only
+    monotypes there, so no type-checked procedure is refused. -/
+@[expose] def Procedure.instantiateTypes (proc : Procedure) (tys : List Expression.Ty) :
+    Option Procedure :=
+  if proc.header.typeArgs.isEmpty then
+    if tys.isEmpty then some proc else none
+  else if tys.length ≠ proc.header.typeArgs.length then none
+  else if !proc.initTypesMono then none
+  else (tys.mapM LTy.toMonoType?).map fun ms =>
+    proc.mapTys (LMonoTy.subst (Strata.Util.HMaps.ofScopes [proc.header.typeArgs.zip ms])) []
+
+instance : Imperative.ProcedureTypeInstantiation Expression Procedure.Header where
+  instantiate := Procedure.instantiateTypes
+
+-- Only transfer metadata is stripped: command metadata (on assert, assume,
+-- init, set, cover) is not part of the formatted output (formatCmd discards
+-- it), while transfer metadata is. Block metadata is kept: it holds the block's
+-- annotations (`@[loopInvariant = (e)]`), which are part of the program.
 def DetCFG.stripMetaData (cfg : DetCFG) : DetCFG :=
   { cfg with blocks := cfg.blocks.map fun (lbl, blk) =>
       (lbl, { blk with transfer := match blk.transfer with
@@ -390,22 +458,39 @@ def DetCFG.stripMetaData (cfg : DetCFG) : DetCFG :=
 
 def Procedure.eraseTypes (p : Procedure) : Procedure :=
   let body' := match p.body with
-    | .structured ss => .structured (Statements.eraseTypes ss)
-    | .cfg c => .cfg (DetCFG.eraseTypes c)
+    | .structured ss o => .structured (Statements.eraseTypes ss) o
+    | .cfg c o => .cfg (DetCFG.eraseTypes c) o
+    | .abstract => .abstract
   { p with body := body', spec := p.spec }
+
+/-- Erase every annotation of a procedure: type parameters become placeholders (count and
+    order kept), signature types are erased, and so are the specification and the body. -/
+def Procedure.eraseAnnots (p : Procedure) : Procedure :=
+  { p with
+    header := { p.header with
+      typeArgs := p.header.typeArgs.map fun _ => "",
+      inputs := p.header.inputs.map fun (x, _) => (x, LMonoTy.erased),
+      outputs := p.header.outputs.map fun (x, _) => (x, LMonoTy.erased) },
+    spec := Procedure.Spec.eraseTypes p.spec,
+    body := match p.body with
+      | .structured ss o => .structured (Statements.eraseAnnots ss) o
+      | .cfg c o => .cfg (DetCFG.eraseAnnots c) o
+      | .abstract => .abstract }
 
 def Procedure.stripMetaData (p : Procedure) : Procedure :=
   let body' := match p.body with
-    | .structured ss => .structured (Imperative.Block.stripMetaData ss)
-    | .cfg c => .cfg (DetCFG.stripMetaData c)
+    | .structured ss o => .structured (Imperative.Block.stripMetaData ss) o
+    | .cfg c o => .cfg (DetCFG.stripMetaData c) o
+    | .abstract => .abstract
   { p with body := body' }
 
 /-- The calls in `p`'s body: structured bodies in statement order, CFG bodies in
     block order. -/
 def Procedure.callSites (p : Procedure) : List CallSite :=
   match p.body with
-  | .structured ss => Statements.callSites ss
-  | .cfg g => g.blocks.flatMap fun (_, blk) => blk.cmds.flatMap Command.callSites
+  | .structured ss _ => Statements.callSites ss
+  | .cfg g _ => g.blocks.flatMap fun (_, blk) => blk.cmds.flatMap Command.callSites
+  | .abstract => []
 
 /-- The type arguments of `proc` at a call, matched one-way against the known types of the
     call's inputs `inTys` and outputs `outTys`; `none` on a mismatch. -/
@@ -413,6 +498,57 @@ def Procedure.matchCall? (proc : Procedure) (inTys outTys : List (Option LMonoTy
     Option SubstOne :=
   LMonoTys.matchKnown? proc.header.typeArgs
     (proc.header.inputs.values.zip inTys ++ proc.header.outputs.values.zip outTys)
+
+/-- The type variables of `m` generated by the type checker or by an earlier evaluated call
+    (`$__ty`, `$__callty`). -/
+private def generatedVars (m : LMonoTy) : List TyIdentifier :=
+  m.freeVars.filter fun a =>
+    [Lambda.genTyPrefix, Lambda.callTyVarPrefix].any fun p => a.startsWith p
+
+/-- `m` with every generated type variable written as `_`, for error messages. -/
+private def hideGenerated (m : LMonoTy) : LMonoTy :=
+  LMonoTy.subst
+    [(generatedVars m).foldl (init := Strata.Util.HMap.empty) fun S a => S.insert a (.ftvar "_")] m
+
+/-- The type arguments of `proc` at a call that stores `tyArgs`. When `tyArgs` has one entry per
+    type parameter, they are read from it, position by position; a parameter whose entry is not a
+    monotype, or mentions a generated type variable, is left unbound. Otherwise (a call that was
+    not type-checked) they are matched one-way against the known types of the call's inputs
+    `inTys` and outputs `outTys`, as in `Procedure.matchCall?`.
+    Every stored entry that is used agrees with the types of the call's arguments; an error
+    names the first parameter on which they disagree. A matched type with generated variables
+    agrees with the stored one when the stored type is an instance of it, and the bindings of
+    those variables carry from one parameter to the next. If the matching fails (the header may
+    name an alias it does not expand, or two arguments may give one parameter different types),
+    the stored entries are then used unchecked. In an error message, generated type variables
+    are written `_`. -/
+def Procedure.callTypeArgs (proc : Procedure) (tyArgs : Option (List LTy))
+    (inTys outTys : List (Option LMonoTy)) : Except String (Option SubstOne) :=
+  match tyArgs with
+  | some tys =>
+    if tys.length = proc.header.typeArgs.length then
+      let stored : SubstOne :=
+        (proc.header.typeArgs.zip tys).foldl (init := Strata.Util.HMap.empty) fun S (a, t) =>
+          match t.toMonoType? with
+          | some m =>
+            if m.freeVars.any (·.startsWith Lambda.genTyPrefix) then S else S.insert a m
+          | none => S
+      let matched := (proc.matchCall? inTys outTys).getD Strata.Util.HMap.empty
+      let agreement : Except (TyIdentifier × LMonoTy × LMonoTy) SubstOne :=
+        proc.header.typeArgs.foldlM (init := Strata.Util.HMap.empty) fun S a =>
+          match stored.find? a, matched.find? a with
+          | some s, some m =>
+            match LMonoTy.matchTy? (generatedVars m) S m s with
+            | some S' => .ok S'
+            | none => .error (a, s, LMonoTy.subst [S] m)
+          | _, _ => .ok S
+      match agreement with
+      | .error (a, s, m) =>
+        .error s!"the call to {proc.header.name.name} stores {a} = {format (hideGenerated s)},\n\
+          but its arguments give {a} = {format (hideGenerated m)}"
+      | .ok _ => .ok (some stored)
+    else .ok (proc.matchCall? inTys outTys)
+  | none => .ok (proc.matchCall? inTys outTys)
 
 namespace Transform
 

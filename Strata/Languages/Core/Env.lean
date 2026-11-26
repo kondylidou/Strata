@@ -71,7 +71,9 @@ def PathConditions.format (ps : PathConditions Expression) : Format :=
   | p :: prest =>
     f!"{PathCondition.format p}{Format.line}" ++ PathConditions.format prest
 
-private def entryExprs : PathConditionEntry Expression → List Expression.Expr
+/-- The expressions a path-condition entry reads: an assumption's body, a `.det` varDecl's
+    right-hand side, the operands of a `distinct`; a `.nondet` varDecl reads none. -/
+@[expose] def entryExprs : PathConditionEntry Expression → List Expression.Expr
   | .assumption _ e => [e]
   | .varDecl _ _ (.det e) => [e]
   | .varDecl _ _ .nondet => []
@@ -166,6 +168,11 @@ structure Env where
   /-- When `true`, concrete execution treats `assume` statements as no-ops
       instead of enforcing them. See `EvalContext.ignoreAssume`. -/
   ignoreAssumes : Bool := false
+  /-- The fresh values that concrete execution gave the outputs of calls run as their contract
+      (to abstract procedures, and to opaque ones under `CallMode.contract`), each with the kind of
+      the procedure (`abstract` or `opaque`), the procedure and the output it was havocked for, so
+      that an error about a condition that reads one can name the call. -/
+  havocOrigins : List (CoreIdent × String × String × String) := []
 
 def Env.init (empty_factory:=false): Env :=
   let σ := Lambda.LState.init
@@ -193,7 +200,7 @@ instance : ToFormat Env where
   format s :=
     let { error, program := _, exprEnv, datatypes, distinct := _, pathConditions, warnings,
           deferred, pathCap := _, collectAllAssertFailures := _, assertFailures := _,
-          ignoreAssumes := _ } := s
+          ignoreAssumes := _, havocOrigins := _ } := s
     format f!"Error:{Format.line}{error}{Format.line}\
               Expression Env:{Format.line}{exprEnv}{Format.line}\
               Datatypes:{Format.line}{datatypes}{Format.line}\
@@ -248,6 +255,10 @@ def Env.addFactoryFunc (E : Env) (func : (Lambda.LFunc CoreLParams)) : Except Me
   if func.isRecursive && (Strata.DL.Util.FuncAttr.findInlineIfConstr func.attr).isNone
       && func.measure.isNone then
     .error (.fromFormat f!"Recursive function '{func.name}' requires a @[cases] parameter or 'decreases' clause")
+  -- A function the program declares is never a copy `MonomorphizeFunctions` made of a factory
+  -- function (those it adds to the factory), so a copy mark on it, which only a program built
+  -- through the API could carry, is dropped: the encoder reads it from its own declaration.
+  let func := { func with attr := Strata.DL.Util.FuncAttr.withoutMonoCopyOf func.attr }
   let exprEnv ← E.exprEnv.addFactoryFunc func
   .ok { E with exprEnv := exprEnv }
 

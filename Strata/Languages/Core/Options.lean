@@ -6,6 +6,7 @@
 module
 
 public import Strata.Init
+public import Strata.DL.SMT.Lean.ExportConfig
 
 public section
 namespace Core
@@ -157,12 +158,22 @@ def CheckLevel.ofString? (s : String) : Option CheckLevel :=
 def CheckLevel.options : String :=
   "'minimal' (simple messages), 'minimalVerbose' (detailed messages, one check), or 'full' (both checks, all outcomes)"
 
-/-- How verification conditions are generated from the loop-free program:
-    `symbolic` (symbolic evaluation, `toCoreProofObligationProgram`) or `wp` (the WP phase, the
-    SSA phase and dead-definition elimination, `Core.WP`). -/
+/-- How verification conditions are generated: from the loop-free program, `symbolic`
+    (symbolic evaluation, `toCoreProofObligationProgram`, or symbolic execution with `symExec`)
+    or `wp` (the WP phase, the SSA phase, then beta reduction, guard forwarding, the inlining of
+    single-use definitions, dead-definition elimination, guard propagation and the constructor
+    fold repeated until they change nothing, `Core.wpVCGenPhases`); or, by passification of
+    each procedure's control-flow graph (`Imperative.PassiveVCGen`), `uwp` (then weakest
+    preconditions) or `usp` (then strongest postconditions). `uwp` and `usp` lower structured
+    bodies to CFGs, after eliminating their loops, and also accept CFG bodies, which the legacy
+    symbolic evaluator and `wp` reject. `uwp` and `usp` are not yet proved sound (see the
+    transforms documentation), so they run only when selected. Symbolic execution (`symExec`)
+    also handles an acyclic CFG body. -/
 inductive VCGenMode where
   | symbolic
   | wp
+  | uwp
+  | usp
   deriving Repr, DecidableEq, Inhabited
 
 /-- When symbolic execution (`--vcgen symexec`) merges the two branches of an `if` where they meet
@@ -196,6 +207,10 @@ def MergeMode.ofString? (s : String) : Option MergeMode :=
     When adding or removing fields, keep `verifyOptionsFlags` and
     `parseVerifyOptions` in StrataMain.lean in sync. -/
 structure VerifyOptions where
+  /-- Optional Lean export: each validity check in its scope, by default the checks the solver
+      leaves undecided, is also written as a Lean theorem file. Frontends inherit this
+      setting. The command line sets it with `--lean-directory`. -/
+  leanExport : Option LeanExport.ExportConfig := none
   -- Pipeline stopping points
   /-- How much diagnostic output to emit. -/
   verbose : VerboseMode
@@ -213,15 +228,41 @@ structure VerifyOptions where
   solver : String
   /-- Solver time limit in seconds. -/
   solverTimeout : Nat
-  /-- Directory to store generated SMT-Lib (`.smt2`) files. -/
+  /-- Directory to store generated SMT-Lib (`.smt2`) files. Concurrent runs may share it: each
+      verdict answers its own run's query, and a file name both runs use holds the query of the
+      run that wrote it last. -/
   vcDirectory : Option System.FilePath
   /-- Always generate SMT-Lib files, even if the verification
       condition is trivial (i.e. resolved by symbolic evaluation
       without needing the solver). -/
   alwaysGenerateSMT : Bool
   -- Encoding options
-  /-- Use SMT-LIB Array theory instead of axiomatized maps. -/
+  /-- Use SMT-LIB Array theory instead of axiomatized maps.
+
+      With it, `Map` and `Set` encode as SMT arrays, which are extensional: two maps
+      equal at every key, or two sets with the same members, are equal. Without it,
+      they are declared sorts whose axioms speak only about `select` or membership,
+      so such an equality is not provable. `Core.verify` defaults to `false`;
+      `MetaVerifier.Options` (for `gen_smt_vcs`) defaults to `true`. -/
   useArrayTheory : Bool
+  /-- With cvc5, fall back to enumerative quantifier instantiation once E-matching saturates
+      (`--full-saturate-quant`). cvc5 then proves some goals whose quantifiers have no usable
+      trigger, which it otherwise reports `unknown` (incomplete). It applies to every cvc5 query,
+      the satisfiability check of `checkLevel := .full` included, where enumerative
+      instantiation may run until the time limit on a satisfiable property, so the obligation
+      reports a solver timeout. `cvc5RetryFullSaturateQuant` applies the fallback to the validity
+      check only. Off by default. -/
+  cvc5FullSaturateQuant : Bool := false
+  /-- With cvc5, when a validity check answers `unknown` because the procedure is incomplete
+      (`:reason-unknown incomplete`), rerun that one query with `--full-saturate-quant`. Other
+      queries keep the default instantiation. Applies to the per-obligation backend only: with
+      `incremental` the option has no effect. The rerun asks only the validity check. Off by
+      default. -/
+  cvc5RetryFullSaturateQuant : Bool := false
+  /-- The time limit of that retry, in seconds; `0` means the query's own limit
+      (`solverTimeout`), or the default solver timeout when the query has none
+      (`solverTimeout := 0`), so the retry always stops. -/
+  cvc5RetryTimeout : Nat := 0
   -- Verification behavior
   /-- Exit after the first verification error instead of
       continuing. -/
@@ -358,6 +399,11 @@ instance : Inhabited VerifyOptions where
     when `symExec` is `none` (a pipeline can name the symbolic execution phase without
     `--vcgen symexec`). -/
 def VerifyOptions.symExecMode (o : VerifyOptions) : MergeMode := o.symExec.getD .default
+
+/-- Whether the default discharge function sends a check to the incremental backend (a live
+    solver session) and not to the batch backend (one SMT-LIB file per check). -/
+def VerifyOptions.usesIncrementalBackend (o : VerifyOptions) : Bool :=
+  o.incremental && !o.alwaysGenerateSMT
 
 def VerifyOptions.quiet : VerifyOptions :=
   { VerifyOptions.default with verbose := .quiet }
